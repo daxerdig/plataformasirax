@@ -1,0 +1,59 @@
+# =============================================================================
+# SynkData Identity Intelligence Platform — Dependencias de Python
+# =============================================================================
+# Instalar con:  pip install -r requirements.txt
+# =============================================================================
+
+# ── Framework web ─────────────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# ── Base de datos — PostgreSQL asíncrono ──────────────────────────────────────
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.1
+
+# ── Base de datos — Redis (caché y rate-limiting) ─────────────────────────────
+redis[hiredis]==5.2.1
+
+# ── Base de datos — Neo4j (grafo de conocimiento) ─────────────────────────────
+neo4j==5.26.0
+
+# ── Validación y configuración ────────────────────────────────────────────────
+pydantic==2.10.4
+pydantic-settings==2.7.1
+email-validator==2.2.0
+
+# ── Autenticación y seguridad ────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+
+# ── Clientes HTTP asíncronos ─────────────────────────────────────────────────
+httpx==0.28.1
+aiohttp==3.11.11
+
+# ── Variables de entorno ──────────────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── Comparación difusa de texto (screening de nombres) ────────────────────────
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.26.1
+
+# ── OCR y procesamiento de documentos ────────────────────────────────────────
+pytesseract==0.3.13
+Pillow==11.1.0
+pdf2image==1.17.0
+
+# ── Validación de números telefónicos (LATAM) ────────────────────────────────
+phonenumbers==8.13.52
+
+# ── Análisis y grafos ────────────────────────────────────────────────────────
+numpy==2.2.1
+networkx==3.4.2
+
+# ── Pruebas ───────────────────────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.28.1

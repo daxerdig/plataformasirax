@@ -1,0 +1,1498 @@
+openapi: 3.0.3
+info:
+  title: SynkData Identity Intelligence Platform API
+  description: |
+    Plataforma de inteligencia de identidad para verificación, antecedentes,
+    cumplimiento normativo y análisis de riesgo enfocada en México y LATAM.
+
+    ## Autenticación
+    Todos los endpoints protegidos requieren un token JWT en el header
+    `Authorization: Bearer <token>`.
+
+    ## Códigos de respuesta
+    - `200` Operación exitosa
+    - `201` Recurso creado
+    - `400` Error de validación en los datos de entrada
+    - `401` Token de autenticación inválido o expirado
+    - `403` Permisos insuficientes para la operación
+    - `404` Recurso no encontrado
+    - `429` Límite de peticiones excedido
+    - `500` Error interno del servidor
+  version: 1.0.0
+  contact:
+    name: SynkData Team
+    email: dev@synkdata.io
+    url: https://synkdata.io
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Servidor de desarrollo
+  - url: https://api.synkdata.io/api/v1
+    description: Servidor de producción
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Verification
+    description: Verificación de identidad (CURP, RFC, nombres)
+  - name: Screening
+    description: Screening en listas restrictivas y compliance
+  - name: Identity
+    description: Correlación de identidad, trust score y evaluación
+  - name: Risk
+    description: Análisis de riesgo y scoring
+  - name: Analytics
+    description: Métricas, dashboards y monitoreo
+
+paths:
+  # ── VERIFICATION ──────────────────────────────────────────────────────
+  /verify/:
+    post:
+      tags: [Verification]
+      summary: Verificación completa de identidad
+      description: |
+        Realiza la verificación integral de identidad combinando:
+        validación de CURP, validación de RFC, verificación de
+        consistencia entre ambos documentos y coincidencia fonética
+        del nombre proporcionado.
+      operationId: verifyIdentity
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            example:
+              curp: "GOME850101HDFRRN09"
+              rfc: "GOME850101ABC"
+              name: "JUAN GOMEZ RODRIGUEZ"
+              birth_date: "1985-01-01"
+              gender: "H"
+      responses:
+        '200':
+          description: Resultado de la verificación de identidad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResponse'
+        '400':
+          description: Datos de entrada inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /curp/validate:
+    post:
+      tags: [Verification]
+      summary: Validar una CURP
+      description: |
+        Realiza la validación completa de una CURP: formato, dígito verificador
+        y opcionalmente consulta contra la base de datos de RENAPO.
+      operationId: validateCurp
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurpValidateRequest'
+            example:
+              curp: "GOME850101HDFRRN09"
+              check_renapo: false
+      responses:
+        '200':
+          description: Resultado de la validación de la CURP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurpValidationResult'
+
+  /curp/search:
+    post:
+      tags: [Verification]
+      summary: Buscar CURP en RENAPO
+      description: |
+        Busca una CURP en la base de datos de RENAPO proporcionando
+        los datos personales del individuo.
+      operationId: searchCurp
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurpSearchRequest'
+            example:
+              name: "JUAN"
+              paternal: "GOMEZ"
+              maternal: "RODRIGUEZ"
+              birth_date: "1985-01-01"
+              gender: "H"
+              state: "DF"
+      responses:
+        '200':
+          description: Lista de candidatos CURP encontrados
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CurpCandidate'
+
+  /curp/{curp}:
+    get:
+      tags: [Verification]
+      summary: Obtener validación cacheada de CURP
+      operationId: getCachedCurpValidation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: curp
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 18
+            maxLength: 18
+          description: CURP a buscar en el caché
+          example: "GOME850101HDFRRN09"
+      responses:
+        '200':
+          description: Resultado de validación cacheado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurpValidationResult'
+        '404':
+          description: No se encontró una validación previa
+
+  /rfc/validate:
+    post:
+      tags: [Verification]
+      summary: Validar un RFC
+      description: |
+        Realiza la validación completa de un RFC: formato, tipo de persona,
+        dígito verificador y opcionalmente verifica el estado en el SAT.
+      operationId: validateRfc
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RfcValidateRequest'
+            example:
+              rfc: "GOME850101ABC"
+              check_sat: false
+      responses:
+        '200':
+          description: Resultado de la validación del RFC
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcValidationResult'
+
+  /rfc/verify-sat:
+    post:
+      tags: [Verification]
+      summary: Verificar RFC contra el SAT
+      description: |
+        Verifica un RFC contra los servicios del SAT, incluyendo
+        el estado en la Lista de Facilitadores de Contribuyentes (LFTP).
+      operationId: verifyRfcSat
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rfc]
+              properties:
+                rfc:
+                  type: string
+                  minLength: 12
+                  maxLength: 13
+                  description: RFC a verificar contra el SAT
+                  example: "GOME850101ABC"
+      responses:
+        '200':
+          description: Resultado de la verificación SAT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcValidationResult'
+
+  /rfc/{rfc}:
+    get:
+      tags: [Verification]
+      summary: Obtener validación cacheada de RFC
+      operationId: getCachedRfcValidation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: rfc
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 12
+            maxLength: 13
+          description: RFC a buscar en el caché
+          example: "GOME850101ABC"
+      responses:
+        '200':
+          description: Resultado de validación cacheado
+        '404':
+          description: No se encontró una validación previa
+
+  # ── SCREENING ─────────────────────────────────────────────────────────
+  /screening/person:
+    post:
+      tags: [Screening]
+      summary: Screening de persona física contra listas restrictivas
+      description: |
+        Realiza el screening completo de una persona física contra todas
+        las listas restrictivas y de compliance configuradas: OFAC, ONU,
+        OpenSanctions, Interpol, SAT 69-B, DOF, SCJN y PEP.
+      operationId: screenPerson
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreeningPersonRequest'
+            example:
+              name: "JUAN PEREZ LOPEZ"
+              curp: "PELJ800101HDFRRN09"
+              rfc: "PELJ800101XYZ"
+              country: "MX"
+              threshold: 0.85
+      responses:
+        '200':
+          description: Screening completado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreeningResult'
+
+  /screening/entity:
+    post:
+      tags: [Screening]
+      summary: Screening de persona moral o entidad corporativa
+      description: |
+        Realiza el screening de una persona moral o entidad corporativa
+        contra las listas restrictivas aplicables.
+      operationId: screenEntity
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreeningEntityRequest'
+            example:
+              name: "Corporativo Alfa S.A. de C.V."
+              country: "MX"
+      responses:
+        '200':
+          description: Screening completado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreeningResult'
+
+  /screening/sat-69b:
+    post:
+      tags: [Screening]
+      summary: Verificación en lista SAT 69-B
+      description: |
+        Verifica si un contribuyente está listado en el artículo 69-B
+        del Código Fiscal de la Federación (presunción de operaciones simuladas).
+      operationId: screenSat69b
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Sat69bRequest'
+            example:
+              name: "Empresa Ejemplo S.A. de C.V."
+              rfc: "EEE850101ABC"
+      responses:
+        '200':
+          description: Verificación completada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sat69bResult'
+
+  /screening/pep:
+    post:
+      tags: [Screening]
+      summary: Verificación de Persona Políticamente Expuesta (PEP)
+      operationId: screenPep
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 500
+                  description: Nombre de la persona a verificar como PEP
+                  example: "ANDRÉS MANUEL LÓPEZ OBRADOR"
+                country:
+                  type: string
+                  maxLength: 5
+                  default: "MX"
+                  description: País para contextualizar la búsqueda PEP
+      responses:
+        '200':
+          description: Verificación completada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PepResult'
+
+  /screening/{request_id}:
+    get:
+      tags: [Screening]
+      summary: Consultar resultado de screening previo
+      operationId: getScreeningResult
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Identificador único de la solicitud
+      responses:
+        '200':
+          description: Resultado encontrado
+        '404':
+          description: Solicitud no encontrada
+
+  # ── IDENTITY ──────────────────────────────────────────────────────────
+  /identity/correlate:
+    post:
+      tags: [Identity]
+      summary: Correlación de identidad
+      description: |
+        Ejecuta la correlación cruzada de todas las señales de identidad
+        proporcionadas (nombre, CURP, RFC, correo, teléfono, redes sociales)
+        para determinar la consistencia y confianza de la identidad declarada.
+      operationId: correlateIdentity
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityData'
+            example:
+              name: "JUAN GOMEZ RODRIGUEZ"
+              curp: "GOME850101HDFRRN09"
+              rfc: "GOME850101ABC"
+              email: "juan.gomez@empresa.com.mx"
+              phone: "+525512345678"
+              username: "jgomez"
+              company: "Empresa S.A."
+              domain: "empresa.com.mx"
+      responses:
+        '200':
+          description: Correlación completada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrelationResult'
+
+  /identity/trust-score:
+    post:
+      tags: [Identity]
+      summary: Cálculo del puntaje de confianza (Trust Score)
+      description: |
+        Calcula el puntaje de confianza de una identidad basándose en
+        señales positivas: RENAPO válido (+20), RFC válido (+15),
+        SAT activo (+15), screening limpio (+20), etc.
+      operationId: calculateTrustScore
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustContext'
+      responses:
+        '200':
+          description: Cálculo completado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustScoreResult'
+
+  /identity/assess:
+    post:
+      tags: [Identity]
+      summary: Evaluación completa de identidad
+      description: |
+        Realiza la evaluación integral de identidad combinando:
+        1) Correlación cruzada de señales, 2) Cálculo del trust score,
+        3) Evaluación de riesgo con recomendación de decisión.
+      operationId: assessIdentity
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityData'
+            example:
+              name: "JUAN GOMEZ RODRIGUEZ"
+              curp: "GOME850101HDFRRN09"
+              rfc: "GOME850101ABC"
+              email: "juan.gomez@empresa.com.mx"
+              phone: "+525512345678"
+      responses:
+        '200':
+          description: Evaluación completada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullIdentityResponse'
+
+  /identity/{assessment_id}:
+    get:
+      tags: [Identity]
+      summary: Consultar evaluación de identidad previa
+      operationId: getIdentityAssessment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Identificador único de la evaluación
+      responses:
+        '200':
+          description: Evaluación encontrada
+        '404':
+          description: Evaluación no encontrada
+
+  # ── RISK ──────────────────────────────────────────────────────────────
+  /risk/assess:
+    post:
+      tags: [Risk]
+      summary: Evaluación de riesgo de identidad
+      description: |
+        Evalúa el nivel de riesgo de una identidad basándose en señales
+        negativas del screening, verificaciones fallidas, inteligencia
+        digital y resultados de correlación.
+      operationId: assessRisk
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RiskContext'
+      responses:
+        '200':
+          description: Evaluación completada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskAssessmentResult'
+
+  /risk/quick:
+    post:
+      tags: [Risk]
+      summary: Verificación rápida de riesgo (solo screening)
+      description: |
+        Realiza una verificación rápida de riesgo basada únicamente en
+        los resultados del screening en listas restrictivas.
+      operationId: quickRiskCheck
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ofac
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Si hay coincidencia en OFAC
+        - name: open_sanctions
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Si hay coincidencia en OpenSanctions
+        - name: un_sanctions
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Si hay coincidencia en la ONU
+        - name: interpol
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Si hay coincidencia en Interpol
+        - name: rnd
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Si aparece en el RND
+      responses:
+        '200':
+          description: Verificación completada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskAssessmentResult'
+
+  /risk/{assessment_id}:
+    get:
+      tags: [Risk]
+      summary: Consultar evaluación de riesgo previa
+      operationId: getRiskAssessment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Evaluación encontrada
+        '404':
+          description: Evaluación no encontrada
+
+  # ── ANALYTICS ─────────────────────────────────────────────────────────
+  /analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Dashboard ejecutivo
+      description: |
+        Obtiene las métricas clave de la plataforma para el período
+        especificado: total de verificaciones, tasa de aprobación,
+        distribución de riesgo, etc.
+      operationId: getExecutiveDashboard
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+          description: Número de días hacia atrás para calcular las métricas
+      responses:
+        '200':
+          description: Dashboard obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutiveDashboard'
+
+  /analytics/risk-distribution:
+    get:
+      tags: [Analytics]
+      summary: Distribución de riesgo
+      operationId: getRiskDistribution
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Distribución obtenida exitosamente
+
+  /analytics/trends/{metric}:
+    get:
+      tags: [Analytics]
+      summary: Tendencias temporales
+      description: |
+        Métricas disponibles: verifications, risk_score, trust_score,
+        approval_rate, processing_time.
+      operationId: getTrends
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: metric
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [verifications, risk_score, trust_score, approval_rate, processing_time, screening_hits]
+          description: Métrica a consultar
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 90
+      responses:
+        '200':
+          description: Tendencias obtenidas exitosamente
+        '400':
+          description: Métrica no válida
+
+  /analytics/alerts:
+    get:
+      tags: [Analytics]
+      summary: Lista de alertas
+      operationId: getAlerts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [critical, high, medium, low, info]
+          description: Filtrar por severidad
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Número máximo de alertas a retornar
+      responses:
+        '200':
+          description: Alertas obtenidas exitosamente
+
+  /analytics/alerts/{alert_id}/read:
+    patch:
+      tags: [Analytics]
+      summary: Marcar alerta como leída
+      operationId: markAlertAsRead
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: alert_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Alerta marcada como leída
+        '404':
+          description: Alerta no encontrada
+
+  /analytics/regional:
+    get:
+      tags: [Analytics]
+      summary: Métricas regionales
+      operationId: getRegionalMetrics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Métricas regionales obtenidas exitosamente
+
+  /analytics/industry:
+    get:
+      tags: [Analytics]
+      summary: Métricas por industria
+      operationId: getIndustryMetrics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Métricas por industria obtenidas exitosamente
+
+# ── COMPONENTS ────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtenido del endpoint de autenticación.
+        Formato: `Authorization: Bearer <token>`
+
+  schemas:
+    # ── Request schemas ───────────────────────────────────────────────
+    VerifyRequest:
+      type: object
+      properties:
+        curp:
+          type: string
+          minLength: 18
+          maxLength: 18
+          description: Clave Única de Registro de Población (18 caracteres)
+          example: "GOME850101HDFRRN09"
+        rfc:
+          type: string
+          minLength: 12
+          maxLength: 13
+          description: Registro Federal de Contribuyentes (12-13 caracteres)
+          example: "GOME850101ABC"
+        name:
+          type: string
+          maxLength: 255
+          description: Nombre completo de la persona
+          example: "JUAN GOMEZ RODRIGUEZ"
+        birth_date:
+          type: string
+          format: date
+          description: Fecha de nacimiento en formato ISO (YYYY-MM-DD)
+          example: "1985-01-01"
+        gender:
+          type: string
+          pattern: "^[HM]$"
+          description: "Sexo de la persona: 'H' (hombre) o 'M' (mujer)"
+          example: "H"
+
+    CurpValidateRequest:
+      type: object
+      required: [curp]
+      properties:
+        curp:
+          type: string
+          minLength: 18
+          maxLength: 18
+          description: CURP a validar
+          example: "GOME850101HDFRRN09"
+        check_renapo:
+          type: boolean
+          default: false
+          description: Consultar RENAPO para validación adicional
+
+    CurpSearchRequest:
+      type: object
+      required: [name, paternal, maternal, birth_date, gender]
+      properties:
+        name:
+          type: string
+          description: Nombre(s) de pila
+          example: "JUAN"
+        paternal:
+          type: string
+          description: Apellido paterno
+          example: "GOMEZ"
+        maternal:
+          type: string
+          description: Apellido materno
+          example: "RODRIGUEZ"
+        birth_date:
+          type: string
+          format: date
+          description: Fecha de nacimiento
+          example: "1985-01-01"
+        gender:
+          type: string
+          pattern: "^[HM]$"
+          description: "Sexo: 'H' o 'M'"
+          example: "H"
+        state:
+          type: string
+          maxLength: 2
+          description: Clave de la entidad federativa (2 letras)
+          example: "DF"
+
+    RfcValidateRequest:
+      type: object
+      required: [rfc]
+      properties:
+        rfc:
+          type: string
+          minLength: 12
+          maxLength: 13
+          description: RFC a validar
+          example: "GOME850101ABC"
+        check_sat:
+          type: boolean
+          default: false
+          description: Consultar el SAT para validación adicional
+
+    ScreeningPersonRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 500
+          description: Nombre completo de la persona a screening
+          example: "JUAN PEREZ LOPEZ"
+        curp:
+          type: string
+          maxLength: 18
+          description: CURP de la persona (opcional)
+          example: "PELJ800101HDFRRN09"
+        rfc:
+          type: string
+          maxLength: 13
+          description: RFC de la persona (opcional)
+          example: "PELJ800101XYZ"
+        country:
+          type: string
+          maxLength: 5
+          default: "MX"
+          description: País de nacionalidad (código ISO)
+          example: "MX"
+        threshold:
+          type: number
+          minimum: 0.5
+          maximum: 1.0
+          description: Umbral de similitud personalizado
+          example: 0.85
+
+    ScreeningEntityRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 500
+          description: Nombre de la entidad corporativa
+          example: "Corporativo Alfa S.A. de C.V."
+        country:
+          type: string
+          maxLength: 5
+          default: "MX"
+          description: País de registro
+        threshold:
+          type: number
+          minimum: 0.5
+          maximum: 1.0
+          description: Umbral de similitud personalizado
+
+    Sat69bRequest:
+      type: object
+      required: [name, rfc]
+      properties:
+        name:
+          type: string
+          description: Nombre del contribuyente
+          example: "Empresa Ejemplo S.A. de C.V."
+        rfc:
+          type: string
+          minLength: 12
+          maxLength: 13
+          description: RFC del contribuyente
+          example: "EEE850101ABC"
+
+    IdentityData:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Nombre completo de la persona
+          example: "JUAN GOMEZ RODRIGUEZ"
+        curp:
+          type: string
+          description: CURP de la persona
+          example: "GOME850101HDFRRN09"
+        rfc:
+          type: string
+          description: RFC de la persona
+          example: "GOME850101ABC"
+        email:
+          type: string
+          format: email
+          description: Correo electrónico
+          example: "juan.gomez@empresa.com.mx"
+        phone:
+          type: string
+          description: Número telefónico (formato E.164 preferido)
+          example: "+525512345678"
+        username:
+          type: string
+          description: Nombre de usuario
+          example: "jgomez"
+        company:
+          type: string
+          description: Empresa donde labora
+          example: "Empresa S.A."
+        domain:
+          type: string
+          description: Dominio de la empresa
+          example: "empresa.com.mx"
+        social_profiles:
+          type: array
+          description: Perfiles en redes sociales
+          items:
+            type: object
+            properties:
+              platform:
+                type: string
+                description: Plataforma social
+                example: "linkedin"
+              url:
+                type: string
+                format: uri
+                description: URL del perfil
+                example: "https://linkedin.com/in/jgomez"
+
+    TrustContext:
+      type: object
+      properties:
+        renapo_valid:
+          type: boolean
+          default: false
+          description: CURP validada contra RENAPO
+        rfc_valid:
+          type: boolean
+          default: false
+          description: RFC con formato y dígito verificador válidos
+        sat_active:
+          type: boolean
+          default: false
+          description: RFC activo en el SAT
+        screening_clean:
+          type: boolean
+          default: false
+          description: Screening en listas restrictivas sin coincidencias
+        professional_presence:
+          type: boolean
+          default: false
+          description: Presencia profesional verificable
+        github_active:
+          type: boolean
+          default: false
+          description: Perfil activo en GitHub
+        linkedin_found:
+          type: boolean
+          default: false
+          description: Perfil encontrado en LinkedIn
+        email_verifiable:
+          type: boolean
+          default: false
+          description: Correo electrónico verificable (MX + SMTP)
+        phone_valid:
+          type: boolean
+          default: false
+          description: Número telefónico válido
+
+    RiskContext:
+      type: object
+      properties:
+        ofac_match:
+          type: boolean
+          default: false
+          description: Coincidencia en lista OFAC SDN
+        open_sanctions_match:
+          type: boolean
+          default: false
+          description: Coincidencia en OpenSanctions
+        un_match:
+          type: boolean
+          default: false
+          description: Coincidencia en lista de sanciones de la ONU
+        interpol_match:
+          type: boolean
+          default: false
+          description: Coincidencia en avisos de Interpol
+        rnd_positive:
+          type: boolean
+          default: false
+          description: Aparece en el Registro Nacional de Detenciones
+        sat_69b_listed:
+          type: boolean
+          default: false
+          description: Listado en SAT 69-B (operaciones simuladas)
+        identity_inconsistent:
+          type: boolean
+          default: false
+          description: Identidad inconsistente detectada
+        multiple_identities:
+          type: boolean
+          default: false
+          description: Múltiples identidades detectadas
+        email_disposable:
+          type: boolean
+          default: false
+          description: Correo temporal/desechable
+        no_digital_presence:
+          type: boolean
+          default: false
+          description: Sin presencia digital
+        phone_voip_suspicious:
+          type: boolean
+          default: false
+          description: Teléfono VoIP o sospechoso
+        correlation_confidence:
+          type: number
+          description: Confianza de la correlación de identidad (0-100)
+          example: 85.0
+
+    # ── Response schemas ──────────────────────────────────────────────
+    VerificationResponse:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Identificador único de la solicitud
+        curp_result:
+          $ref: '#/components/schemas/CurpValidationResult'
+        rfc_result:
+          $ref: '#/components/schemas/RfcValidationResult'
+        consistency_result:
+          $ref: '#/components/schemas/ConsistencyResult'
+        overall_valid:
+          type: boolean
+          description: Si la verificación general es positiva
+        name_similarity:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Similitud fonética del nombre (0-1)
+        verified_at:
+          type: string
+          format: date-time
+          description: Fecha y hora de la verificación
+
+    CurpValidationResult:
+      type: object
+      properties:
+        is_valid:
+          type: boolean
+          description: Si la CURP pasó todas las validaciones
+        format_valid:
+          type: boolean
+          description: Si el formato de la CURP es correcto
+        check_digit_valid:
+          type: boolean
+          description: Si el dígito verificador es correcto
+        renapo_match:
+          type: boolean
+          nullable: true
+          description: Si la CURP fue encontrada en RENAPO
+        extracted_info:
+          type: object
+          nullable: true
+          description: Información extraída de la CURP
+          properties:
+            name_initials:
+              type: string
+              example: "GOME"
+            birth_date:
+              type: string
+              example: "1985-01-01"
+            gender:
+              type: string
+              example: "H"
+            state_code:
+              type: string
+              example: "DF"
+            state_name:
+              type: string
+              example: "Ciudad de México"
+            internal_consonants:
+              type: string
+              example: "RRN"
+        errors:
+          type: array
+          items:
+            type: string
+          description: Lista de errores encontrados
+        validated_at:
+          type: string
+          format: date-time
+
+    RfcValidationResult:
+      type: object
+      properties:
+        is_valid:
+          type: boolean
+        format_valid:
+          type: boolean
+        check_digit_valid:
+          type: boolean
+        person_type:
+          type: string
+          enum: [fisica, moral, desconocido]
+          description: Tipo de persona
+        sat_active:
+          type: boolean
+          nullable: true
+          description: Si el RFC está activo en el SAT
+        extracted_info:
+          type: object
+          nullable: true
+          properties:
+            person_type:
+              type: string
+            name_initials:
+              type: string
+            birth_date:
+              type: string
+            homoclave:
+              type: string
+        errors:
+          type: array
+          items:
+            type: string
+        validated_at:
+          type: string
+          format: date-time
+
+    ConsistencyResult:
+      type: object
+      properties:
+        is_consistent:
+          type: boolean
+        birth_date_match:
+          type: boolean
+          nullable: true
+        name_initials_match:
+          type: boolean
+          nullable: true
+        inconsistencies:
+          type: array
+          items:
+            type: string
+
+    CurpCandidate:
+      type: object
+      properties:
+        curp:
+          type: string
+        name:
+          type: string
+          nullable: true
+        birth_date:
+          type: string
+          nullable: true
+        match_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+
+    ScreeningResult:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchDetail'
+        total_hits:
+          type: integer
+          minimum: 0
+        max_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        risk_level:
+          type: string
+          enum: [none, low, medium, high, critical]
+        sources_checked:
+          type: array
+          items:
+            type: string
+        sources_failed:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+
+    MatchDetail:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Fuente donde se encontró la coincidencia
+          example: "ofac"
+        score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Puntuación de similitud
+          example: 0.95
+        match_type:
+          type: string
+          enum: [exact, fuzzy, phonetic, alias]
+          description: Tipo de coincidencia
+        entity_name:
+          type: string
+          description: Nombre de la entidad coincidente
+          example: "JUAN GOMEZ RODRIGUEZ"
+        entity_data:
+          type: object
+          additionalProperties: true
+          description: Datos adicionales de la entidad
+        is_confirmed:
+          type: boolean
+          description: Si la coincidencia fue confirmada manualmente
+
+    Sat69bResult:
+      type: object
+      properties:
+        is_listed:
+          type: boolean
+        rfc:
+          type: string
+        company_name:
+          type: string
+        status:
+          type: string
+          description: "Estado: presunto, desvirtuado, definitivo"
+        publication_date:
+          type: string
+        docket_number:
+          type: string
+        observations:
+          type: string
+
+    PepResult:
+      type: object
+      properties:
+        is_pep:
+          type: boolean
+        positions:
+          type: array
+          items:
+            type: string
+        country:
+          type: string
+        level:
+          type: string
+          description: "Nivel: national, state, municipal"
+        source:
+          type: string
+
+    CorrelationResult:
+      type: object
+      properties:
+        identity_confidence:
+          type: number
+          minimum: 0.0
+          maximum: 100.0
+          description: Puntaje de confianza de identidad (0-100)
+          example: 85.5
+        signals:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              passed:
+                type: boolean
+              details:
+                type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        flags:
+          type: array
+          items:
+            type: string
+
+    TrustScoreResult:
+      type: object
+      properties:
+        score:
+          type: number
+          minimum: 0.0
+          maximum: 100.0
+          description: Puntuación de confianza (0-100)
+          example: 85.0
+        max_possible:
+          type: number
+          example: 100.0
+        level:
+          type: string
+          enum: [very_high, high, medium, low, very_low]
+          description: Nivel de confianza categorizado
+        contributors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              points:
+                type: number
+              max_points:
+                type: number
+              passed:
+                type: boolean
+              details:
+                type: string
+
+    RiskAssessmentResult:
+      type: object
+      properties:
+        risk_score:
+          type: number
+          minimum: 0.0
+          maximum: 100.0
+          description: Puntuación de riesgo (0-100)
+          example: 15.0
+        trust_score:
+          type: number
+          minimum: 0.0
+          maximum: 100.0
+          description: Puntuación de confianza
+          example: 85.0
+        recommendation:
+          type: string
+          enum: [APPROVE, REVIEW, REJECT]
+          description: Recomendación de decisión
+        risk_factors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              score:
+                type: number
+              severity:
+                type: string
+                enum: [critical, high, medium, low]
+              details:
+                type: string
+        mitigating_factors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              points_reduced:
+                type: number
+              details:
+                type: string
+
+    FullIdentityResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        identity_data:
+          $ref: '#/components/schemas/IdentityData'
+        correlation:
+          $ref: '#/components/schemas/CorrelationResult'
+        trust_score:
+          $ref: '#/components/schemas/TrustScoreResult'
+        risk_assessment:
+          $ref: '#/components/schemas/RiskAssessmentResult'
+        evaluated_at:
+          type: string
+          format: date-time
+
+    ExecutiveDashboard:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            days:
+              type: integer
+            start_date:
+              type: string
+            end_date:
+              type: string
+        total_verifications:
+          type: integer
+        approval_rate:
+          type: number
+        risk_distribution:
+          type: object
+          properties:
+            approve:
+              type: integer
+            review:
+              type: integer
+            reject:
+              type: integer
+        top_risk_factors:
+          type: array
+          items:
+            type: object
+        avg_processing_time_ms:
+          type: number
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Descripción del error
+        error_type:
+          type: string
+          description: Tipo de error
+          example: "validation_error"
+        path:
+          type: string
+          description: Ruta donde ocurrió el error
+          example: "/api/v1/curp/validate"

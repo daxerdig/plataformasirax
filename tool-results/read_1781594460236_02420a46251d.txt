@@ -1,0 +1,760 @@
+     1→"""
+     2→Esquemas Pydantic para el módulo de inteligencia de identidad.
+     3→
+     4→Define los modelos de validación y serialización para:
+     5→- Correlación de identidad (entrada y salida)
+     6→- Puntuación de confianza (trust score)
+     7→- Evaluación de riesgo (risk assessment)
+     8→- Respuesta completa de evaluación de identidad
+     9→
+    10→Todos los esquemas incluyen documentación en español para la
+    11→generación automática de la documentación OpenAPI.
+    12→"""
+    13→
+    14→from __future__ import annotations
+    15→
+    16→from datetime import datetime
+    17→from enum import Enum
+    18→from typing import Any, Dict, List, Optional
+    19→
+    20→from pydantic import BaseModel, Field, field_validator, model_validator
+    21→
+    22→
+    23→# ---------------------------------------------------------------------------
+    24→# Enumeraciones compartidas
+    25→# ---------------------------------------------------------------------------
+    26→class TrustLevel(str, Enum):
+    27→    """Nivel de confianza de una identidad."""
+    28→
+    29→    VERY_HIGH = "very_high"
+    30→    HIGH = "high"
+    31→    MEDIUM = "medium"
+    32→    LOW = "low"
+    33→    VERY_LOW = "very_low"
+    34→
+    35→
+    36→class Recommendation(str, Enum):
+    37→    """Recomendación resultante de la evaluación de riesgo."""
+    38→
+    39→    APPROVE = "APPROVE"
+    40→    REVIEW = "REVIEW"
+    41→    REJECT = "REJECT"
+    42→
+    43→
+    44→class Severity(str, Enum):
+    45→    """Severidad de un factor de riesgo."""
+    46→
+    47→    CRITICAL = "critical"
+    48→    HIGH = "high"
+    49→    MEDIUM = "medium"
+    50→    LOW = "low"
+    51→
+    52→
+    53→# ---------------------------------------------------------------------------
+    54→# Esquemas de entrada (request)
+    55→# ---------------------------------------------------------------------------
+    56→class SocialProfileInput(BaseModel):
+    57→    """
+    58→    Perfil social de una persona en una plataforma específica.
+    59→
+    60→    Attributes:
+    61→        platform: Nombre de la plataforma (ej. linkedin, github, twitter).
+    62→        username: Nombre de usuario en la plataforma.
+    63→        display_name: Nombre visible en el perfil.
+    64→        url: URL del perfil.
+    65→        verified: Si el perfil está verificado.
+    66→    """
+    67→
+    68→    platform: str = Field(
+    69→        ...,
+    70→        description="Nombre de la plataforma (ej. 'linkedin', 'github', 'twitter').",
+    71→    )
+    72→    username: Optional[str] = Field(
+    73→        default=None,
+    74→        description="Nombre de usuario en la plataforma.",
+    75→    )
+    76→    display_name: Optional[str] = Field(
+    77→        default=None,
+    78→        description="Nombre visible en el perfil.",
+    79→    )
+    80→    url: Optional[str] = Field(
+    81→        default=None,
+    82→        description="URL del perfil.",
+    83→    )
+    84→    verified: bool = Field(
+    85→        default=False,
+    86→        description="Si el perfil está verificado en la plataforma.",
+    87→    )
+    88→
+    89→
+    90→class IdentityData(BaseModel):
+    91→    """
+    92→    Datos de identidad para correlación cruzada.
+    93→
+    94→    Al menos uno de los campos de identificación debe ser proporcionado.
+    95→    Se recomienda proporcionar la mayor cantidad de datos posible
+    96→    para una correlación más precisa.
+    97→
+    98→    Attributes:
+    99→        name: Nombre completo de la persona.
+   100→        curp: Clave Única de Registro de Población (18 caracteres).
+   101→        rfc: Registro Federal de Contribuyentes (12-13 caracteres).
+   102→        email: Correo electrónico.
+   103→        phone: Número telefónico (formato E.164).
+   104→        username: Nombre de usuario genérico.
+   105→        company: Nombre de la empresa declarada.
+   106→        domain: Dominio declarado (ej. empresa.com.mx).
+   107→        social_profiles: Lista de perfiles en redes sociales y plataformas.
+   108→    """
+   109→
+   110→    name: Optional[str] = Field(
+   111→        default=None,
+   112→        max_length=500,
+   113→        description="Nombre completo de la persona.",
+   114→        examples=["JUAN GOMEZ RODRIGUEZ"],
+   115→    )
+   116→    curp: Optional[str] = Field(
+   117→        default=None,
+   118→        min_length=18,
+   119→        max_length=18,
+   120→        description="Clave Única de Registro de Población (18 caracteres).",
+   121→        examples=["GOME850101HDFRRN09"],
+   122→    )
+   123→    rfc: Optional[str] = Field(
+   124→        default=None,
+   125→        min_length=12,
+   126→        max_length=13,
+   127→        description="Registro Federal de Contribuyentes (12-13 caracteres).",
+   128→        examples=["GOME850101ABC"],
+   129→    )
+   130→    email: Optional[str] = Field(
+   131→        default=None,
+   132→        max_length=320,
+   133→        description="Correo electrónico de la persona.",
+   134→        examples=["juan.gomez@empresa.com.mx"],
+   135→    )
+   136→    phone: Optional[str] = Field(
+   137→        default=None,
+   138→        max_length=20,
+   139→        description="Número telefónico en formato E.164.",
+   140→        examples=["+525512345678"],
+   141→    )
+   142→    username: Optional[str] = Field(
+   143→        default=None,
+   144→        max_length=100,
+   145→        description="Nombre de usuario genérico.",
+   146→        examples=["juangomez"],
+   147→    )
+   148→    company: Optional[str] = Field(
+   149→        default=None,
+   150→        max_length=500,
+   151→        description="Nombre de la empresa declarada.",
+   152→        examples=["Empresa S.A. de C.V."],
+   153→    )
+   154→    domain: Optional[str] = Field(
+   155→        default=None,
+   156→        max_length=255,
+   157→        description="Dominio declarado (ej. empresa.com.mx).",
+   158→        examples=["empresa.com.mx"],
+   159→    )
+   160→    social_profiles: List[SocialProfileInput] = Field(
+   161→        default_factory=list,
+   162→        description="Lista de perfiles en redes sociales y plataformas.",
+   163→    )
+   164→
+   165→    @model_validator(mode="after")
+   166→    def validate_at_least_one_field(self) -> "IdentityData":
+   167→        """Valida que al menos un campo de identificación sea proporcionado."""
+   168→        if not any([self.name, self.curp, self.rfc, self.email, self.phone, self.username]):
+   169→            raise ValueError(
+   170→                "Debe proporcionar al menos uno de los siguientes campos: "
+   171→                "name, curp, rfc, email, phone o username."
+   172→            )
+   173→        return self
+   174→
+   175→    model_config = {
+   176→        "json_schema_extra": {
+   177→            "examples": [
+   178→                {
+   179→                    "name": "JUAN GOMEZ RODRIGUEZ",
+   180→                    "curp": "GOME850101HDFRRN09",
+   181→                    "rfc": "GOME850101ABC",
+   182→                    "email": "juan.gomez@empresa.com.mx",
+   183→                    "phone": "+525512345678",
+   184→                    "username": "juangomez",
+   185→                    "company": "Empresa S.A. de C.V.",
+   186→                    "domain": "empresa.com.mx",
+   187→                    "social_profiles": [
+   188→                        {
+   189→                            "platform": "linkedin",
+   190→                            "username": "juangomez",
+   191→                            "display_name": "Juan Gomez Rodriguez",
+   192→                        },
+   193→                        {
+   194→                            "platform": "github",
+   195→                            "username": "juangomez",
+   196→                            "display_name": "Juan Gomez",
+   197→                        },
+   198→                    ],
+   199→                }
+   200→            ]
+   201→        }
+   202→    }
+   203→
+   204→
+   205→class TrustContext(BaseModel):
+   206→    """
+   207→    Contexto completo para el cálculo del puntaje de confianza (trust score).
+   208→
+   209→    Incluye los resultados de todas las verificaciones, screening
+   210→    e inteligencia digital realizadas previamente.
+   211→
+   212→    Attributes:
+   213→        renapo_valid: Si la CURP fue validada exitosamente por RENAPO.
+   214→        rfc_valid: Si el RFC pasó la validación de formato y dígito verificador.
+   215→        sat_active: Si el RFC está activo en el SAT.
+   216→        screening_clean: Si el screening en listas restrictivas no arrojó coincidencias.
+   217→        professional_presence: Si se detectó presencia profesional (LinkedIn, etc.).
+   218→        github_active: Si se encontró un perfil activo en GitHub.
+   219→        linkedin_found: Si se encontró un perfil en LinkedIn.
+   220→        email_verifiable: Si el correo electrónico es verificable (MX + entregable).
+   221→        phone_valid: Si el número telefónico es válido.
+   222→        verification_details: Detalles adicionales de cada verificación.
+   223→    """
+   224→
+   225→    renapo_valid: bool = Field(
+   226→        default=False,
+   227→        description="Si la CURP fue validada exitosamente por RENAPO.",
+   228→    )
+   229→    rfc_valid: bool = Field(
+   230→        default=False,
+   231→        description="Si el RFC pasó la validación de formato y dígito verificador.",
+   232→    )
+   233→    sat_active: bool = Field(
+   234→        default=False,
+   235→        description="Si el RFC está activo en el SAT.",
+   236→    )
+   237→    screening_clean: bool = Field(
+   238→        default=False,
+   239→        description="Si el screening en listas restrictivas no arrojó coincidencias.",
+   240→    )
+   241→    professional_presence: bool = Field(
+   242→        default=False,
+   243→        description="Si se detectó presencia profesional (LinkedIn, sitio web, etc.).",
+   244→    )
+   245→    github_active: bool = Field(
+   246→        default=False,
+   247→        description="Si se encontró un perfil activo en GitHub.",
+   248→    )
+   249→    linkedin_found: bool = Field(
+   250→        default=False,
+   251→        description="Si se encontró un perfil en LinkedIn.",
+   252→    )
+   253→    email_verifiable: bool = Field(
+   254→        default=False,
+   255→        description="Si el correo electrónico es verificable (MX + entregable).",
+   256→    )
+   257→    phone_valid: bool = Field(
+   258→        default=False,
+   259→        description="Si el número telefónico es válido.",
+   260→    )
+   261→    verification_details: Dict[str, Any] = Field(
+   262→        default_factory=dict,
+   263→        description="Detalles adicionales de cada verificación realizada.",
+   264→    )
+   265→
+   266→
+   267→class RiskContext(BaseModel):
+   268→    """
+   269→    Contexto completo para la evaluación de riesgo.
+   270→
+   271→    Incluye los resultados de screening, verificaciones fallidas,
+   272→    inteligencia digital y resultados de correlación.
+   273→
+   274→    Attributes:
+   275→        rnd_positive: Si la persona aparece en el Registro Nacional de Detenciones.
+   276→        ofac_match: Si hay coincidencia en la lista OFAC SDN.
+   277→        un_match: Si hay coincidencia en la lista de sanciones de la ONU.
+   278→        interpol_match: Si hay coincidencia en avisos de Interpol.
+   279→        open_sanctions_match: Si hay coincidencia en OpenSanctions.
+   280→        pep_identified: Si la persona está identificada como PEP.
+   281→        sat_69b_listed: Si el RFC está listado en el artículo 69-B del SAT.
+   282→        identity_inconsistent: Si la correlación de identidad reveló inconsistencias.
+   283→        email_disposable: Si el correo electrónico usa un dominio desechable.
+   284→        multiple_identities: Si se detectaron múltiples identidades asociadas.
+   285→        no_digital_presence: Si no se encontró presencia digital alguna.
+   286→        phone_voip_suspicious: Si el teléfono es VoIP o sospechoso.
+   287→        screening_details: Detalles del screening en listas restrictivas.
+   288→        correlation_result: Resultados de la correlación de identidad.
+   289→        digital_intel_details: Detalles de la inteligencia digital.
+   290→    """
+   291→
+   292→    rnd_positive: bool = Field(
+   293→        default=False,
+   294→        description="Si la persona aparece en el Registro Nacional de Detenciones.",
+   295→    )
+   296→    ofac_match: bool = Field(
+   297→        default=False,
+   298→        description="Si hay coincidencia en la lista OFAC SDN.",
+   299→    )
+   300→    un_match: bool = Field(
+   301→        default=False,
+   302→        description="Si hay coincidencia en la lista de sanciones de la ONU.",
+   303→    )
+   304→    interpol_match: bool = Field(
+   305→        default=False,
+   306→        description="Si hay coincidencia en avisos de Interpol.",
+   307→    )
+   308→    open_sanctions_match: bool = Field(
+   309→        default=False,
+   310→        description="Si hay coincidencia en OpenSanctions.",
+   311→    )
+   312→    pep_identified: bool = Field(
+   313→        default=False,
+   314→        description="Si la persona está identificada como PEP.",
+   315→    )
+   316→    sat_69b_listed: bool = Field(
+   317→        default=False,
+   318→        description="Si el RFC está listado en el artículo 69-B del SAT.",
+   319→    )
+   320→    identity_inconsistent: bool = Field(
+   321→        default=False,
+   322→        description="Si la correlación de identidad reveló inconsistencias significativas.",
+   323→    )
+   324→    email_disposable: bool = Field(
+   325→        default=False,
+   326→        description="Si el correo electrónico usa un dominio desechable.",
+   327→    )
+   328→    multiple_identities: bool = Field(
+   329→        default=False,
+   330→        description="Si se detectaron múltiples identidades asociadas a los mismos datos.",
+   331→    )
+   332→    no_digital_presence: bool = Field(
+   333→        default=False,
+   334→        description="Si no se encontró presencia digital alguna.",
+   335→    )
+   336→    phone_voip_suspicious: bool = Field(
+   337→        default=False,
+   338→        description="Si el teléfono es VoIP o sospechoso.",
+   339→    )
+   340→    screening_details: Dict[str, Any] = Field(
+   341→        default_factory=dict,
+   342→        description="Detalles del screening en listas restrictivas.",
+   343→    )
+   344→    correlation_confidence: Optional[float] = Field(
+   345→        default=None,
+   346→        ge=0.0,
+   347→        le=100.0,
+   348→        description="Puntuación de confianza de la correlación de identidad (0-100).",
+   349→    )
+   350→    digital_intel_details: Dict[str, Any] = Field(
+   351→        default_factory=dict,
+   352→        description="Detalles de la inteligencia digital.",
+   353→    )
+   354→
+   355→
+   356→# ---------------------------------------------------------------------------
+   357→# Esquemas de salida — Correlación
+   358→# ---------------------------------------------------------------------------
+   359→class CorrelationSignal(BaseModel):
+   360→    """
+   361→    Señal individual de correlación de identidad.
+   362→
+   363→    Cada señal representa una verificación específica de consistencia
+   364→    entre los diferentes datos de identidad proporcionados.
+   365→
+   366→    Attributes:
+   367→        name: Nombre descriptivo de la señal de correlación.
+   368→        passed: Si la verificación pasó exitosamente.
+   369→        score: Puntuación asignada (0-100) según el resultado.
+   370→        weight: Peso relativo de esta señal en el cálculo global.
+   371→        details: Descripción detallada del resultado.
+   372→    """
+   373→
+   374→    name: str = Field(
+   375→        ...,
+   376→        description="Nombre descriptivo de la señal de correlación.",
+   377→        examples=["Consistencia CURP-RFC"],
+   378→    )
+   379→    passed: bool = Field(
+   380→        ...,
+   381→        description="Si la verificación de correlación pasó exitosamente.",
+   382→    )
+   383→    score: float = Field(
+   384→        ...,
+   385→        ge=0.0,
+   386→        le=100.0,
+   387→        description="Puntuación asignada según el resultado (0-100).",
+   388→    )
+   389→    weight: float = Field(
+   390→        ...,
+   391→        ge=0.0,
+   392→        le=1.0,
+   393→        description="Peso relativo de esta señal en el cálculo global (0-1).",
+   394→    )
+   395→    details: str = Field(
+   396→        default="",
+   397→        description="Descripción detallada del resultado de la correlación.",
+   398→    )
+   399→
+   400→    model_config = {"from_attributes": True}
+   401→
+   402→
+   403→class CorrelationResult(BaseModel):
+   404→    """
+   405→    Resultado completo de la correlación de identidad.
+   406→
+   407→    Combina todas las señales de correlación para producir una
+   408→    puntuación de confianza de identidad global.
+   409→
+   410→    Attributes:
+   411→        identity_confidence: Puntuación de confianza de identidad (0-100).
+   412→        signals: Lista de señales de correlación evaluadas.
+   413→        warnings: Advertencias detectadas durante la correlación.
+   414→        flags: Indicadores de alerta activados.
+   415→    """
+   416→
+   417→    identity_confidence: float = Field(
+   418→        ...,
+   419→        ge=0.0,
+   420→        le=100.0,
+   421→        description=(
+   422→            "Puntuación de confianza de identidad (0-100). "
+   423→            "95-100: todas las señales consistentes. "
+   424→            "70-94: inconsistencias menores. "
+   425→            "30-69: inconsistencias mayores. "
+   426→            "0-29: señales contradictorias."
+   427→        ),
+   428→    )
+   429→    signals: List[CorrelationSignal] = Field(
+   430→        default_factory=list,
+   431→        description="Lista de señales de correlación evaluadas.",
+   432→    )
+   433→    warnings: List[str] = Field(
+   434→        default_factory=list,
+   435→        description="Advertencias detectadas durante la correlación de identidad.",
+   436→    )
+   437→    flags: List[str] = Field(
+   438→        default_factory=list,
+   439→        description="Indicadores de alerta activados durante la correlación.",
+   440→    )
+   441→
+   442→    model_config = {"from_attributes": True}
+   443→
+   444→
+   445→# ---------------------------------------------------------------------------
+   446→# Esquemas de salida — Trust Score
+   447→# ---------------------------------------------------------------------------
+   448→class ScoreContributor(BaseModel):
+   449→    """
+   450→    Contribuyente individual al puntaje de confianza (trust score).
+   451→
+   452→    Attributes:
+   453→        name: Nombre descriptivo del factor contribuyente.
+   454→        points: Puntos obtenidos por este factor.
+   455→        max_points: Puntos máximos posibles para este factor.
+   456→        passed: Si el factor se cumplió exitosamente.
+   457→        details: Descripción del resultado.
+   458→    """
+   459→
+   460→    name: str = Field(
+   461→        ...,
+   462→        description="Nombre descriptivo del factor contribuyente al trust score.",
+   463→        examples=["RENAPO válido"],
+   464→    )
+   465→    points: float = Field(
+   466→        ...,
+   467→        ge=0.0,
+   468→        description="Puntos obtenidos por este factor.",
+   469→    )
+   470→    max_points: float = Field(
+   471→        ...,
+   472→        gt=0.0,
+   473→        description="Puntos máximos posibles para este factor.",
+   474→    )
+   475→    passed: bool = Field(
+   476→        ...,
+   477→        description="Si el factor contribuyente se cumplió exitosamente.",
+   478→    )
+   479→    details: str = Field(
+   480→        default="",
+   481→        description="Descripción del resultado de este factor.",
+   482→    )
+   483→
+   484→    model_config = {"from_attributes": True}
+   485→
+   486→
+   487→class TrustScoreResult(BaseModel):
+   488→    """
+   489→    Resultado completo del cálculo del puntaje de confianza.
+   490→
+   491→    Attributes:
+   492→        score: Puntuación de confianza obtenida (0-100).
+   493→        max_possible: Puntuación máxima posible.
+   494→        contributors: Lista de factores contribuyentes con su detalle.
+   495→        level: Nivel de confianza categorizado.
+   496→    """
+   497→
+   498→    score: float = Field(
+   499→        ...,
+   500→        ge=0.0,
+   501→        le=100.0,
+   502→        description="Puntuación de confianza obtenida (0-100).",
+   503→    )
+   504→    max_possible: float = Field(
+   505→        default=100.0,
+   506→        description="Puntuación máxima posible del trust score.",
+   507→    )
+   508→    contributors: List[ScoreContributor] = Field(
+   509→        default_factory=list,
+   510→        description="Lista de factores contribuyentes al trust score.",
+   511→    )
+   512→    level: TrustLevel = Field(
+   513→        ...,
+   514→        description=(
+   515→            "Nivel de confianza categorizado: "
+   516→            "very_high (90+), high (70-89), medium (50-69), low (30-49), very_low (0-29)."
+   517→        ),
+   518→    )
+   519→
+   520→    model_config = {"from_attributes": True}
+   521→
+   522→
+   523→# ---------------------------------------------------------------------------
+   524→# Esquemas de salida — Risk Assessment
+   525→# ---------------------------------------------------------------------------
+   526→class RiskFactor(BaseModel):
+   527→    """
+   528→    Factor de riesgo individual identificado en la evaluación.
+   529→
+   530→    Attributes:
+   531→        name: Nombre descriptivo del factor de riesgo.
+   532→        score: Puntuación de riesgo asignada (contribución al risk_score).
+   533→        severity: Severidad del factor (critical, high, medium, low).
+   534→        details: Descripción detallada del factor de riesgo.
+   535→    """
+   536→
+   537→    name: str = Field(
+   538→        ...,
+   539→        description="Nombre descriptivo del factor de riesgo.",
+   540→        examples=["Coincidencia en lista OFAC SDN"],
+   541→    )
+   542→    score: float = Field(
+   543→        ...,
+   544→        ge=0.0,
+   545→        description="Puntuación de riesgo asignada por este factor.",
+   546→    )
+   547→    severity: Severity = Field(
+   548→        ...,
+   549→        description="Severidad del factor de riesgo: critical, high, medium, low.",
+   550→    )
+   551→    details: str = Field(
+   552→        default="",
+   553→        description="Descripción detallada del factor de riesgo.",
+   554→    )
+   555→
+   556→    model_config = {"from_attributes": True}
+   557→
+   558→
+   559→class MitigatingFactor(BaseModel):
+   560→    """
+   561→    Factor mitigante que reduce la puntuación de riesgo.
+   562→
+   563→    Attributes:
+   564→        name: Nombre descriptivo del factor mitigante.
+   565→        points_reduced: Puntos de riesgo reducidos por este factor.
+   566→        details: Descripción del factor mitigante.
+   567→    """
+   568→
+   569→    name: str = Field(
+   570→        ...,
+   571→        description="Nombre descriptivo del factor mitigante.",
+   572→        examples=["Identidad verificada por RENAPO"],
+   573→    )
+   574→    points_reduced: float = Field(
+   575→        ...,
+   576→        ge=0.0,
+   577→        description="Puntos de riesgo reducidos por este factor mitigante.",
+   578→    )
+   579→    details: str = Field(
+   580→        default="",
+   581→        description="Descripción del factor mitigante.",
+   582→    )
+   583→
+   584→    model_config = {"from_attributes": True}
+   585→
+   586→
+   587→class RiskAssessmentResult(BaseModel):
+   588→    """
+   589→    Resultado completo de la evaluación de riesgo.
+   590→
+   591→    Attributes:
+   592→        risk_score: Puntuación de riesgo (0-100, señales negativas).
+   593→        trust_score: Puntuación de confianza (señales positivas).
+   594→        recommendation: Recomendación de decisión (APPROVE, REVIEW, REJECT).
+   595→        risk_factors: Lista de factores de riesgo identificados.
+   596→        mitigating_factors: Lista de factores mitigantes identificados.
+   597→    """
+   598→
+   599→    risk_score: float = Field(
+   600→        ...,
+   601→        ge=0.0,
+   602→        le=100.0,
+   603→        description=(
+   604→            "Puntuación de riesgo (0-100, señales negativas). "
+   605→            "0-15: aprobado, 16-40: revisión, >40: rechazo."
+   606→        ),
+   607→    )
+   608→    trust_score: float = Field(
+   609→        ...,
+   610→        ge=0.0,
+   611→        le=100.0,
+   612→        description="Puntuación de confianza derivada del trust score (señales positivas).",
+   613→    )
+   614→    recommendation: Recommendation = Field(
+   615→        ...,
+   616→        description=(
+   617→            "Recomendación de decisión: "
+   618→            "APPROVE (riesgo ≤ 15), REVIEW (riesgo 16-40), REJECT (riesgo > 40). "
+   619→            "Cualquier coincidencia crítica (OFAC, RND) resulta en REJECT automático."
+   620→        ),
+   621→    )
+   622→    risk_factors: List[RiskFactor] = Field(
+   623→        default_factory=list,
+   624→        description="Lista de factores de riesgo identificados.",
+   625→    )
+   626→    mitigating_factors: List[MitigatingFactor] = Field(
+   627→        default_factory=list,
+   628→        description="Lista de factores mitigantes identificados.",
+   629→    )
+   630→
+   631→    model_config = {"from_attributes": True}
+   632→
+   633→
+   634→# ---------------------------------------------------------------------------
+   635→# Esquema de respuesta completa
+   636→# ---------------------------------------------------------------------------
+   637→class FullIdentityResponse(BaseModel):
+   638→    """
+   639→    Respuesta completa de la evaluación de identidad.
+   640→
+   641→    Combina los resultados de correlación, trust score y evaluación
+   642→    de riesgo en una sola respuesta consolidada.
+   643→
+   644→    Attributes:
+   645→        id: Identificador único de la evaluación.
+   646→        identity_data: Datos de identidad proporcionados como entrada.
+   647→        correlation: Resultado de la correlación de identidad.
+   648→        trust_score: Resultado del cálculo de confianza.
+   649→        risk_assessment: Resultado de la evaluación de riesgo.
+   650→        evaluated_at: Fecha y hora de la evaluación.
+   651→    """
+   652→
+   653→    id: str = Field(
+   654→        ...,
+   655→        description="Identificador único de la evaluación de identidad.",
+   656→    )
+   657→    identity_data: IdentityData = Field(
+   658→        ...,
+   659→        description="Datos de identidad proporcionados como entrada.",
+   660→    )
+   661→    correlation: CorrelationResult = Field(
+   662→        ...,
+   663→        description="Resultado de la correlación de identidad.",
+   664→    )
+   665→    trust_score: TrustScoreResult = Field(
+   666→        ...,
+   667→        description="Resultado del cálculo del puntaje de confianza.",
+   668→    )
+   669→    risk_assessment: RiskAssessmentResult = Field(
+   670→        ...,
+   671→        description="Resultado de la evaluación de riesgo.",
+   672→    )
+   673→    evaluated_at: datetime = Field(
+   674→        default_factory=datetime.now,
+   675→        description="Fecha y hora en que se realizó la evaluación.",
+   676→    )
+   677→
+   678→    model_config = {"from_attributes": True}
+   679→
+   680→
+   681→# ---------------------------------------------------------------------------
+   682→# Esquemas para consulta de resultados previos
+   683→# ---------------------------------------------------------------------------
+   684→class IdentityCorrelationDetail(BaseModel):
+   685→    """
+   686→    Detalle de una evaluación de identidad previa almacenada.
+   687→
+   688→    Attributes:
+   689→        id: Identificador único.
+   690→        name: Nombre evaluado.
+   691→        curp: CURP evaluada.
+   692→        rfc: RFC evaluado.
+   693→        identity_confidence: Puntuación de confianza de identidad.
+   694→        signals: Señales de correlación evaluadas (JSON).
+   695→        warnings: Advertencias detectadas.
+   696→        flags: Indicadores de alerta.
+   697→        created_at: Fecha de creación.
+   698→    """
+   699→
+   700→    id: str = Field(..., description="Identificador único del registro.")
+   701→    name: Optional[str] = Field(default=None, description="Nombre evaluado.")
+   702→    curp: Optional[str] = Field(default=None, description="CURP evaluada.")
+   703→    rfc: Optional[str] = Field(default=None, description="RFC evaluado.")
+   704→    email: Optional[str] = Field(default=None, description="Correo evaluado.")
+   705→    phone: Optional[str] = Field(default=None, description="Teléfono evaluado.")
+   706→    identity_confidence: float = Field(
+   707→        ..., description="Puntuación de confianza de identidad."
+   708→    )
+   709→    signals: Optional[List[Dict[str, Any]]] = Field(
+   710→        default=None, description="Señales de correlación evaluadas."
+   711→    )
+   712→    warnings: Optional[List[str]] = Field(
+   713→        default=None, description="Advertencias detectadas."
+   714→    )
+   715→    flags: Optional[List[str]] = Field(
+   716→        default=None, description="Indicadores de alerta."
+   717→    )
+   718→    created_at: Optional[str] = Field(
+   719→        default=None, description="Fecha de creación."
+   720→    )
+   721→
+   722→    model_config = {"from_attributes": True}
+   723→
+   724→
+   725→class RiskAssessmentDetail(BaseModel):
+   726→    """
+   727→    Detalle de una evaluación de riesgo previa almacenada.
+   728→
+   729→    Attributes:
+   730→        id: Identificador único.
+   731→        correlation_id: ID de la correlación asociada.
+   732→        trust_score: Puntuación de confianza.
+   733→        risk_score: Puntuación de riesgo.
+   734→        recommendation: Recomendación (APPROVE/REVIEW/REJECT).
+   735→        risk_factors: Factores de riesgo identificados.
+   736→        mitigating_factors: Factores mitigantes identificados.
+   737→        created_at: Fecha de creación.
+   738→    """
+   739→
+   740→    id: str = Field(..., description="Identificador único del registro.")
+   741→    correlation_id: str = Field(
+   742→        ..., description="ID de la correlación de identidad asociada."
+   743→    )
+   744→    trust_score: float = Field(..., description="Puntuación de confianza.")
+   745→    risk_score: float = Field(..., description="Puntuación de riesgo.")
+   746→    recommendation: str = Field(
+   747→        ..., description="Recomendación: APPROVE, REVIEW o REJECT."
+   748→    )
+   749→    risk_factors: Optional[List[Dict[str, Any]]] = Field(
+   750→        default=None, description="Factores de riesgo identificados."
+   751→    )
+   752→    mitigating_factors: Optional[List[Dict[str, Any]]] = Field(
+   753→        default=None, description="Factores mitigantes identificados."
+   754→    )
+   755→    created_at: Optional[str] = Field(
+   756→        default=None, description="Fecha de creación."
+   757→    )
+   758→
+   759→    model_config = {"from_attributes": True}
+   760→

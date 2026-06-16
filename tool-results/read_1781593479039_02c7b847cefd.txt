@@ -1,0 +1,740 @@
+     1→"""
+     2→Servicio de comparación difusa y fonética para la plataforma SynkData.
+     3→
+     4→Implementa comparación de nombres con soporte para:
+     5→- Emparejamiento difuso basado en Levenshtein (fuzzywuzzy)
+     6→- Emparejamiento fonético adaptado al español
+     7→- Comparación con alias y nombres alternativos
+     8→- Normalización de entidades para comparación (acentos, mayúsculas, partículas)
+     9→- Manejo de inversión de nombres, nombres parciales e iniciales
+    10→
+    11→Este módulo es fundamental para el proceso de screening en listas restrictivas,
+    12→donde variaciones ortográficas y fonéticas deben ser detectadas como coincidencias
+    13→potenciales para evitar falsos negativos en el cumplimiento normativo.
+    14→"""
+    15→
+    16→from __future__ import annotations
+    17→
+    18→import logging
+    19→import re
+    20→import unicodedata
+    21→from dataclasses import dataclass, field
+    22→from enum import Enum
+    23→from itertools import permutations
+    24→from typing import Optional
+    25→
+    26→from fuzzywuzzy import fuzz
+    27→
+    28→from app.utils.phonetic import phonetic_encode, phonetic_match
+    29→from app.utils.text_normalizer import (
+    30→    _NAME_PARTICLES,
+    31→    normalize_for_comparison,
+    32→    remove_accents,
+    33→    split_full_name,
+    34→)
+    35→
+    36→logger = logging.getLogger(__name__)
+    37→
+    38→
+    39→# ---------------------------------------------------------------------------
+    40→# Tipos de coincidencia
+    41→# ---------------------------------------------------------------------------
+    42→class MatchType(str, Enum):
+    43→    """Tipos de coincidencia identificados por el motor de comparación."""
+    44→
+    45→    EXACT = "exact"
+    46→    FUZZY = "fuzzy"
+    47→    PHONETIC = "phonetic"
+    48→    ALIAS = "alias"
+    49→
+    50→
+    51→# ---------------------------------------------------------------------------
+    52→# Modelo de resultado
+    53→# ---------------------------------------------------------------------------
+    54→@dataclass(frozen=True, slots=True)
+    55→class MatchResult:
+    56→    """
+    57→    Resultado de una comparación difusa o fonética.
+    58→
+    59→    Attributes:
+    60→        target: Cadena objetivo contra la que se comparó.
+    61→        score: Puntuación de similitud (0.0 a 1.0).
+    62→        match_type: Tipo de coincidencia detectada.
+    63→        confidence: Nivel de confianza del resultado (0.0 a 1.0).
+    64→            Difiere del score en que considera el tipo de coincidencia
+    65→            y la calidad general del emparejamiento.
+    66→    """
+    67→
+    68→    target: str
+    69→    score: float
+    70→    match_type: MatchType
+    71→    confidence: float
+    72→
+    73→    def __post_init__(self) -> None:
+    74→        """Valida que los valores numéricos estén en rango [0.0, 1.0]."""
+    75→        for field_name in ("score", "confidence"):
+    76→            value = getattr(self, field_name)
+    77→            if not 0.0 <= value <= 1.0:
+    78→                raise ValueError(
+    79→                    f"{field_name} debe estar entre 0.0 y 1.0, recibido: {value}"
+    80→                )
+    81→
+    82→
+    83→# ---------------------------------------------------------------------------
+    84→# Partículas comunes en nombres en español para normalización avanzada
+    85→# ---------------------------------------------------------------------------
+    86→_SPANISH_PARTICLES: set[str] = {
+    87→    "DE", "DEL", "DE LA", "DE LOS", "DE LAS",
+    88→    "LA", "LAS", "LOS", "EL",
+    89→    "Y", "E", "O", "U",
+    90→    "EN", "POR", "CON", "PARA", "A",
+    91→    "VON", "VAN", "DI", "DA", "DOS", "DAS",
+    92→    "SAN", "SANTA", "SANTO",
+    93→}
+    94→
+    95→# Nombres compuestos comunes en español
+    96→_COMPOUND_NAMES: set[str] = {
+    97→    "JOSE LUIS", "JOSE MANUEL", "JOSE ANGEL", "JOSE ANTONIO",
+    98→    "JOSE CARLOS", "JOSE EDUARDO", "JOSE FRANCISCO", "JOSE GUADALUPE",
+    99→    "JOSE MIGUEL", "JOSE PEDRO", "JOSE RAMON", "JOSE RAFAEL",
+   100→    "JOSE ROBERTO", "JOSE RICARDO",
+   101→    "MARIA DEL CARMEN", "MARIA ELENA", "MARIA TERESA", "MARIA GUADALUPE",
+   102→    "MARIA ISABEL", "MARIA JOSE", "MARIA LUISA", "MARIA DE LOS ANGELES",
+   103→    "MARIA DE LA PAZ", "MARIA DEL ROSARIO", "MARIA DEL PILAR",
+   104→    "MARIA CRISTINA", "MARIA DE LA LUZ", "MARIA FERNANDA",
+   105→    "MARIA MARGARITA", "MARIA SOLEDAD", "MARIA VICTORIA",
+   106→    "JUAN CARLOS", "JUAN MANUEL", "JUAN JOSE", "JUAN ANTONIO",
+   107→    "JUAN PEDRO", "JUAN LUIS", "JUAN FRANCISCO", "JUAN EDUARDO",
+   108→    "CARLOS ALBERTO", "CARLOS EDUARDO", "CARLOS MANUEL",
+   109→    "LUIS ALBERTO", "LUIS MANUEL", "LUIS CARLOS",
+   110→    "PEDRO ANTONIO", "PEDRO MANUEL",
+   111→    "MIGUEL ANGEL", "MIGUEL ANTONIO",
+   112→    "FRANCISCO JAVIER", "FRANCISCO JOSE",
+   113→    "ANTONIO JOSE", "ANTONIO MANUEL",
+   114→    "ROBERTO CARLOS",
+   115→    "ANA MARIA", "ANA LUISA", "ANA CRISTINA",
+   116→    "ROSA MARIA", "ROSA ELENA",
+   117→    "LAURA PATRICIA", "LAURA ELENA",
+   118→}
+   119→
+   120→
+   121→# ---------------------------------------------------------------------------
+   122→# Servicio principal
+   123→# ---------------------------------------------------------------------------
+   124→class FuzzyMatcherService:
+   125→    """
+   126→    Servicio de comparación difusa y fonética para nombres y entidades.
+   127→
+   128→    Provee métodos para comparar nombres contra listas de objetivos
+   129→    utilizando múltiples estrategias de comparación:
+   130→    - Comparación exacta (normalizada)
+   131→    - Comparación difusa (Levenshtein via fuzzywuzzy)
+   132→    - Comparación fonética (algoritmo adaptado al español)
+   133→    - Comparación con alias y nombres alternativos
+   134→
+   135→    El servicio normaliza automáticamente los nombres antes de la
+   136→    comparación, eliminando acentos, mayúsculas y partículas comunes.
+   137→
+   138→    Example:
+   139→        >>> matcher = FuzzyMatcherService()
+   140→        >>> results = matcher.match("José Vázquez", ["JOSE VAZQUEZ", "PEDRO LOPEZ"])
+   141→        >>> len(results)
+   142→        1
+   143→        >>> results[0].match_type
+   144→        <MatchType.EXACT: 'exact'>
+   145→    """
+   146→
+   147→    def __init__(self, *, min_score: float = 0.5) -> None:
+   148→        """
+   149→        Inicializa el servicio de comparación difusa.
+   150→
+   151→        Args:
+   152→            min_score: Puntuación mínima para incluir un resultado.
+   153→                Resultados con score menor son descartados.
+   154→        """
+   155→        self._min_score = min_score
+   156→
+   157→    # ── Comparación difusa principal ─────────────────────────────────────
+   158→
+   159→    def match(
+   160→        self,
+   161→        query: str,
+   162→        targets: list[str],
+   163→        threshold: float = 0.85,
+   164→    ) -> list[MatchResult]:
+   165→        """
+   166→        Compara una cadena de consulta contra una lista de objetivos.
+   167→
+   168→        Aplica múltiples estrategias de comparación y retorna las
+   169→        coincidencias que superan el umbral especificado:
+   170→        1. Comparación exacta normalizada
+   171→        2. Comparación difusa (Levenshtein)
+   172→        3. Comparación fonética (español)
+   173→        4. Comparación con inversión de nombre/apellido
+   174→
+   175→        Args:
+   176→            query: Nombre o cadena a buscar.
+   177→            targets: Lista de nombres objetivos contra los que comparar.
+   178→            threshold: Umbral mínimo de similitud (0.0 a 1.0).
+   179→
+   180→        Returns:
+   181→            Lista de MatchResult ordenada por score descendente,
+   182→            sin duplicados (se conserva el mejor resultado por target).
+   183→        """
+   184→        if not query or not targets:
+   185→            return []
+   186→
+   187→        normalized_query = self.normalize_entity(query)
+   188→        if not normalized_query:
+   189→            return []
+   190→
+   191→        results: dict[str, MatchResult] = {}
+   192→
+   193→        for target in targets:
+   194→            if not target:
+   195→                continue
+   196→
+   197→            # ── 1. Comparación exacta normalizada ──────────────────────
+   198→            normalized_target = self.normalize_entity(target)
+   199→            if not normalized_target:
+   200→                continue
+   201→
+   202→            if normalized_query == normalized_target:
+   203→                self._upsert_result(
+   204→                    results,
+   205→                    target,
+   206→                    MatchResult(
+   207→                        target=target,
+   208→                        score=1.0,
+   209→                        match_type=MatchType.EXACT,
+   210→                        confidence=1.0,
+   211→                    ),
+   212→                )
+   213→                continue
+   214→
+   215→            # ── 2. Comparación difusa ──────────────────────────────────
+   216→            fuzzy_score = self._compute_fuzzy_score(normalized_query, normalized_target)
+   217→            if fuzzy_score >= threshold:
+   218→                confidence = self._compute_confidence(fuzzy_score, MatchType.FUZZY)
+   219→                self._upsert_result(
+   220→                    results,
+   221→                    target,
+   222→                    MatchResult(
+   223→                        target=target,
+   224→                        score=fuzzy_score,
+   225→                        match_type=MatchType.FUZZY,
+   226→                        confidence=confidence,
+   227→                    ),
+   228→                )
+   229→
+   230→            # ── 3. Comparación fonética ────────────────────────────────
+   231→            phonetic_score = phonetic_match(query, target)
+   232→            if phonetic_score >= threshold:
+   233→                confidence = self._compute_confidence(phonetic_score, MatchType.PHONETIC)
+   234→                self._upsert_result(
+   235→                    results,
+   236→                    target,
+   237→                    MatchResult(
+   238→                        target=target,
+   239→                        score=phonetic_score,
+   240→                        match_type=MatchType.PHONETIC,
+   241→                        confidence=confidence,
+   242→                    ),
+   243→                )
+   244→
+   245→            # ── 4. Inversión de nombre/apellido ────────────────────────
+   246→            reversed_score = self._match_reversed(normalized_query, normalized_target)
+   247→            if reversed_score >= threshold:
+   248→                confidence = self._compute_confidence(reversed_score, MatchType.FUZZY)
+   249→                self._upsert_result(
+   250→                    results,
+   251→                    target,
+   252→                    MatchResult(
+   253→                        target=target,
+   254→                        score=reversed_score,
+   255→                        match_type=MatchType.FUZZY,
+   256→                        confidence=confidence,
+   257→                    ),
+   258→                )
+   259→
+   260→            # ── 5. Nombres parciales e iniciales ───────────────────────
+   261→            partial_score = self._match_partial(normalized_query, normalized_target)
+   262→            if partial_score >= threshold:
+   263→                confidence = self._compute_confidence(partial_score, MatchType.FUZZY)
+   264→                self._upsert_result(
+   265→                    results,
+   266→                    target,
+   267→                    MatchResult(
+   268→                        target=target,
+   269→                        score=partial_score,
+   270→                        match_type=MatchType.FUZZY,
+   271→                        confidence=confidence,
+   272→                    ),
+   273→                )
+   274→
+   275→        # Filtrar por score mínimo y ordenar
+   276→        filtered = [
+   277→            r for r in results.values() if r.score >= self._min_score
+   278→        ]
+   279→        return sorted(filtered, key=lambda r: r.score, reverse=True)
+   280→
+   281→    # ── Comparación fonética ────────────────────────────────────────────
+   282→
+   283→    def match_phonetic(
+   284→        self,
+   285→        name: str,
+   286→        targets: list[str],
+   287→    ) -> list[MatchResult]:
+   288→        """
+   289→        Compara un nombre contra objetivos utilizando solo fonética española.
+   290→
+   291→        Utiliza el algoritmo de codificación fonética adaptado al español
+   292→        que considera seseo, yeísmo, equivalencia v/b, etc.
+   293→
+   294→        Args:
+   295→            name: Nombre a buscar.
+   296→            targets: Lista de nombres objetivos.
+   297→
+   298→        Returns:
+   299→            Lista de MatchResult con coincidencias fonéticas.
+   300→        """
+   301→        if not name or not targets:
+   302→            return []
+   303→
+   304→        results: list[MatchResult] = []
+   305→
+   306→        for target in targets:
+   307→            if not target:
+   308→                continue
+   309→
+   310→            phonetic_score = phonetic_match(name, target)
+   311→
+   312→            if phonetic_score >= self._min_score:
+   313→                confidence = self._compute_confidence(phonetic_score, MatchType.PHONETIC)
+   314→                results.append(
+   315→                    MatchResult(
+   316→                        target=target,
+   317→                        score=phonetic_score,
+   318→                        match_type=MatchType.PHONETIC,
+   319→                        confidence=confidence,
+   320→                    )
+   321→                )
+   322→
+   323→        return sorted(results, key=lambda r: r.score, reverse=True)
+   324→
+   325→    # ── Comparación con alias ───────────────────────────────────────────
+   326→
+   327→    def match_with_aliases(
+   328→        self,
+   329→        name: str,
+   330→        aliases: list[str],
+   331→        threshold: float = 0.8,
+   332→    ) -> list[MatchResult]:
+   333→        """
+   334→        Compara un nombre contra una lista de alias/nombres alternativos.
+   335→
+   336→        Los alias suelen tener mayor tolerancia en el umbral de coincidencia
+   337→        ya que representan variaciones intencionales del nombre (apodos,
+   338→        nombres abreviados, transliteraciones).
+   339→
+   340→        Args:
+   341→            name: Nombre a buscar.
+   342→            aliases: Lista de alias o nombres alternativos.
+   343→            threshold: Umbral mínimo de similitud (por defecto 0.8, menor
+   344→                que el estándar de 0.85 para mayor tolerancia).
+   345→
+   346→        Returns:
+   347→            Lista de MatchResult con coincidencias contra alias.
+   348→        """
+   349→        if not name or not aliases:
+   350→            return []
+   351→
+   352→        normalized_name = self.normalize_entity(name)
+   353→        if not normalized_name:
+   354→            return []
+   355→
+   356→        results: dict[str, MatchResult] = {}
+   357→
+   358→        for alias in aliases:
+   359→            if not alias:
+   360→                continue
+   361→
+   362→            normalized_alias = self.normalize_entity(alias)
+   363→            if not normalized_alias:
+   364→                continue
+   365→
+   366→            # Coincidencia exacta de alias
+   367→            if normalized_name == normalized_alias:
+   368→                self._upsert_result(
+   369→                    results,
+   370→                    alias,
+   371→                    MatchResult(
+   372→                        target=alias,
+   373→                        score=1.0,
+   374→                        match_type=MatchType.ALIAS,
+   375→                        confidence=0.95,
+   376→                    ),
+   377→                )
+   378→                continue
+   379→
+   380→            # Comparación difusa con alias
+   381→            fuzzy_score = self._compute_fuzzy_score(normalized_name, normalized_alias)
+   382→            if fuzzy_score >= threshold:
+   383→                confidence = self._compute_confidence(fuzzy_score, MatchType.ALIAS)
+   384→                self._upsert_result(
+   385→                    results,
+   386→                    alias,
+   387→                    MatchResult(
+   388→                        target=alias,
+   389→                        score=fuzzy_score,
+   390→                        match_type=MatchType.ALIAS,
+   391→                        confidence=confidence,
+   392→                    ),
+   393→                )
+   394→
+   395→            # Comparación fonética de alias
+   396→            phonetic_score = phonetic_match(name, alias)
+   397→            if phonetic_score >= threshold:
+   398→                confidence = self._compute_confidence(phonetic_score, MatchType.ALIAS)
+   399→                self._upsert_result(
+   400→                    results,
+   401→                    alias,
+   402→                    MatchResult(
+   403→                        target=alias,
+   404→                        score=phonetic_score,
+   405→                        match_type=MatchType.ALIAS,
+   406→                        confidence=confidence,
+   407→                    ),
+   408→                )
+   409→
+   410→        filtered = [r for r in results.values() if r.score >= self._min_score]
+   411→        return sorted(filtered, key=lambda r: r.score, reverse=True)
+   412→
+   413→    # ── Normalización de entidades ──────────────────────────────────────
+   414→
+   415→    def normalize_entity(self, entity: str) -> str:
+   416→        """
+   417→        Normaliza una entidad (nombre) para comparación.
+   418→
+   419→        Aplica las siguientes transformaciones:
+   420→        1. Eliminación de acentos y diacríticos
+   421→        2. Conversión a mayúsculas
+   422→        3. Eliminación de partículas comunes (de, del, la, y, etc.)
+   423→        4. Normalización de espacios en blanco
+   424→        5. Eliminación de caracteres no alfabéticos (excepto Ñ)
+   425→
+   426→        Args:
+   427→            entity: Nombre o entidad a normalizar.
+   428→
+   429→        Returns:
+   430→            str: Entidad normalizada lista para comparación.
+   431→
+   432→        Example:
+   433→            >>> matcher = FuzzyMatcherService()
+   434→            >>> matcher.normalize_entity("José de la Cruz Vázquez")
+   435→            'JOSE CRUZ VAZQUEZ'
+   436→        """
+   437→        if not entity:
+   438→            return ""
+   439→
+   440→        # Normalización base (acentos, mayúsculas, espacios)
+   441→        normalized = normalize_for_comparison(entity)
+   442→
+   443→        if not normalized:
+   444→            return ""
+   445→
+   446→        # Eliminar partículas comunes en español
+   447→        words = normalized.split()
+   448→        filtered_words = [
+   449→            w for w in words
+   450→            if w not in _SPANISH_PARTICLES
+   451→        ]
+   452→
+   453→        # Si se eliminaron todas las palabras, mantener la normalización base
+   454→        if not filtered_words:
+   455→            return normalized
+   456→
+   457→        return " ".join(filtered_words)
+   458→
+   459→    # ── Métodos auxiliares privados ─────────────────────────────────────
+   460→
+   461→    def _compute_fuzzy_score(self, query: str, target: str) -> float:
+   462→        """
+   463→        Calcula la puntuación difusa combinando múltiples métricas.
+   464→
+   465→        Combina:
+   466→        - ratio: Similitud general (Levenshtein normalizado)
+   467→        - token_sort_ratio: Similitud con tokens ordenados
+   468→        - token_set_ratio: Similitud con conjuntos de tokens
+   469→        - partial_ratio: Similitud parcial
+   470→
+   471→        Retorna el máximo ponderado de todas las métricas.
+   472→
+   473→        Args:
+   474→            query: Cadena de consulta normalizada.
+   475→            target: Cadena objetivo normalizada.
+   476→
+   477→        Returns:
+   478→            float: Puntuación de similitud entre 0.0 y 1.0.
+   479→        """
+   480→        if not query or not target:
+   481→            return 0.0
+   482→
+   483→        # Coincidencia exacta rápida
+   484→        if query == target:
+   485→            return 1.0
+   486→
+   487→        # Múltiples métricas de fuzzywuzzy
+   488→        ratio = fuzz.ratio(query, target) / 100.0
+   489→        token_sort = fuzz.token_sort_ratio(query, target) / 100.0
+   490→        token_set = fuzz.token_set_ratio(query, target) / 100.0
+   491→        partial = fuzz.partial_ratio(query, target) / 100.0
+   492→
+   493→        # Penalizar partial_ratio si las longitudes difieren mucho
+   494→        len_query = len(query)
+   495→        len_target = len(target)
+   496→        length_ratio = min(len_query, len_target) / max(len_query, len_target)
+   497→        if length_ratio < 0.5:
+   498→            partial *= length_ratio
+   499→
+   500→        # Ponderación: token_set es la métrica más robusta para nombres
+   501→        weighted = max(
+   502→            ratio * 0.25,
+   503→            token_sort * 0.35,
+   504→            token_set * 0.30,
+   505→            partial * 0.10,
+   506→        )
+   507→
+   508→        return round(weighted, 4)
+   509→
+   510→    def _compute_confidence(self, score: float, match_type: MatchType) -> float:
+   511→        """
+   512→        Calcula el nivel de confianza de una coincidencia.
+   513→
+   514→        La confianza difiere de la puntuación en que considera el tipo
+   515→        de coincidencia. Las coincidencias exactas y fonéticas tienen
+   516→        mayor confianza que las difusas para el mismo score.
+   517→
+   518→        Args:
+   519→            score: Puntuación de similitud (0.0 a 1.0).
+   520→            match_type: Tipo de coincidencia detectada.
+   521→
+   522→        Returns:
+   523→            float: Nivel de confianza entre 0.0 y 1.0.
+   524→        """
+   525→        # Multiplicadores de confianza por tipo de coincidencia
+   526→        confidence_multipliers: dict[MatchType, float] = {
+   527→            MatchType.EXACT: 1.0,
+   528→            MatchType.PHONETIC: 0.90,
+   529→            MatchType.ALIAS: 0.85,
+   530→            MatchType.FUZZY: 0.80,
+   531→        }
+   532→
+   533→        multiplier = confidence_multipliers.get(match_type, 0.80)
+   534→        return round(score * multiplier, 4)
+   535→
+   536→    def _match_reversed(self, query: str, target: str) -> float:
+   537→        """
+   538→        Compara nombres con inversión de nombre/apellido.
+   539→
+   540→        En español es común que los nombres se registren en diferente
+   541→        orden (nombre primero vs. apellido primero). Este método
+   542→        intenta la comparación con el orden invertido.
+   543→
+   544→        Args:
+   545→            query: Nombre de consulta normalizado.
+   546→            target: Nombre objetivo normalizado.
+   547→
+   548→        Returns:
+   549→            float: Mejor puntuación con inversión.
+   550→        """
+   551→        query_parts = query.split()
+   552→        target_parts = target.split()
+   553→
+   554→        if len(query_parts) < 2 or len(target_parts) < 2:
+   555→            return 0.0
+   556→
+   557→        # Invertir las partes del query
+   558→        reversed_query = " ".join(reversed(query_parts))
+   559→        reversed_score = self._compute_fuzzy_score(reversed_query, target)
+   560→
+   561→        return reversed_score
+   562→
+   563→    def _match_partial(self, query: str, target: str) -> float:
+   564→        """
+   565→        Compara nombres parciales y con iniciales.
+   566→
+   567→        Maneja casos como:
+   568→        - "J PEREZ" coincide con "JUAN PEREZ"
+   569→        - "JOSE M" coincide con "JOSE MANUEL GARCIA"
+   570→        - "PEREZ" coincide con "JUAN PEREZ LOPEZ"
+   571→
+   572→        Args:
+   573→            query: Nombre de consulta normalizado.
+   574→            target: Nombre objetivo normalizado.
+   575→
+   576→        Returns:
+   577→            float: Puntuación de similitud parcial.
+   578→        """
+   579→        query_parts = query.split()
+   580→        target_parts = target.split()
+   581→
+   582→        if not query_parts or not target_parts:
+   583→            return 0.0
+   584→
+   585→        # Verificar si alguna parte del query es una inicial
+   586→        has_initial = any(
+   587→            len(part) == 1 and part.isalpha()
+   588→            for part in query_parts
+   589→        )
+   590→
+   591→        if not has_initial:
+   592→            # Comparación de subconjunto: ¿el query está contenido en el target?
+   593→            if set(query_parts).issubset(set(target_parts)):
+   594→                coverage = len(query_parts) / len(target_parts)
+   595→                return round(max(coverage, 0.7), 4)
+   596→
+   597→            # Verificar si el query es un apellido contenido en el target
+   598→            for part in query_parts:
+   599→                if len(part) > 2 and part in target_parts:
+   600→                    coverage = len(part) / max(len(query), len(target))
+   601→                    return round(max(coverage, 0.6), 4)
+   602→
+   603→            return 0.0
+   604→
+   605→        # Expandir iniciales del query y comparar contra el target
+   606→        match_count = 0
+   607→        total_parts = len(query_parts)
+   608→
+   609→        for q_part in query_parts:
+   610→            if len(q_part) == 1:
+   611→                # Es una inicial: verificar si alguna parte del target comienza con ella
+   612→                if any(t_part.startswith(q_part) for t_part in target_parts):
+   613→                    match_count += 1
+   614→            else:
+   615→                # Es una palabra completa: verificar coincidencia exacta o difusa
+   616→                for t_part in target_parts:
+   617→                    if t_part == q_part or fuzz.ratio(q_part, t_part) / 100.0 >= 0.85:
+   618→                        match_count += 1
+   619→                        break
+   620→
+   621→        if match_count == 0:
+   622→            return 0.0
+   623→
+   624→        partial_score = match_count / total_parts
+   625→        # Reducir confianza si solo hay coincidencias parciales
+   626→        return round(partial_score * 0.85, 4)
+   627→
+   628→    def _upsert_result(
+   629→        self,
+   630→        results: dict[str, MatchResult],
+   631→        target: str,
+   632→        new_result: MatchResult,
+   633→    ) -> None:
+   634→        """
+   635→        Inserta o actualiza un resultado, conservando siempre el mejor.
+   636→
+   637→        Si ya existe un resultado para el mismo target, conserva el
+   638→        que tenga mayor score.
+   639→
+   640→        Args:
+   641→            results: Diccionario de resultados acumulados.
+   642→            target: Clave del objetivo.
+   643→            new_result: Nuevo resultado a insertar/considerar.
+   644→        """
+   645→        existing = results.get(target)
+   646→        if existing is None or new_result.score > existing.score:
+   647→            results[target] = new_result
+   648→
+   649→    # ── Métodos de utilidad ─────────────────────────────────────────────
+   650→
+   651→    def generate_name_variants(self, name: str) -> list[str]:
+   652→        """
+   653→        Genera variantes de un nombre para búsqueda exhaustiva.
+   654→
+   655→        Incluye:
+   656→        - Nombre completo normalizado
+   657→        - Nombre sin partículas
+   658→        - Inversión apellido/nombre
+   659→        - Iniciales
+   660→        - Variante fonética
+   661→        - Nombres parciales (solo apellidos)
+   662→
+   663→        Args:
+   664→            name: Nombre completo.
+   665→
+   666→        Returns:
+   667→            Lista de variantes del nombre sin duplicados.
+   668→        """
+   669→        if not name:
+   670→            return []
+   671→
+   672→        variants: set[str] = set()
+   673→
+   674→        # Nombre normalizado completo
+   675→        full = normalize_for_comparison(name)
+   676→        if full:
+   677→            variants.add(full)
+   678→
+   679→        # Nombre sin partículas
+   680→        no_particles = self.normalize_entity(name)
+   681→        if no_particles:
+   682→            variants.add(no_particles)
+   683→
+   684→        # Inversión de nombre/apellido
+   685→        parts = full.split() if full else []
+   686→        if len(parts) >= 2:
+   687→            reversed_name = " ".join(reversed(parts))
+   688→            variants.add(reversed_name)
+   689→
+   690→        # Solo apellidos (últimas dos palabras)
+   691→        if len(parts) >= 3:
+   692→            surnames = " ".join(parts[-2:])
+   693→            variants.add(surnames)
+   694→
+   695→        # Solo primer apellido
+   696→        if len(parts) >= 2:
+   697→            variants.add(parts[-2])
+   698→
+   699→        # Iniciales
+   700→        from app.utils.text_normalizer import extract_initials
+   701→
+   702→        initials = extract_initials(name)
+   703→        if initials and len(initials) >= 2:
+   704→            variants.add(initials)
+   705→
+   706→        # Código fonético
+   707→        phonetic = phonetic_encode(name)
+   708→        if phonetic and phonetic != "0000":
+   709→            variants.add(f"PHON:{phonetic}")
+   710→
+   711→        return list(variants)
+   712→
+   713→    def is_significant_match(
+   714→        self,
+   715→        result: MatchResult,
+   716→        *,
+   717→        strict: bool = False,
+   718→    ) -> bool:
+   719→        """
+   720→        Determina si un resultado de comparación es significativo.
+   721→
+   722→        Un resultado significativo es aquel que merece ser reportado
+   723→        como una coincidencia potencial en el proceso de screening.
+   724→
+   725→        Args:
+   726→            result: Resultado a evaluar.
+   727→            strict: Si True, aplica criterios más estrictos.
+   728→
+   729→        Returns:
+   730→            bool: True si el resultado es significativo.
+   731→        """
+   732→        if strict:
+   733→            min_score = 0.90
+   734→            min_confidence = 0.85
+   735→        else:
+   736→            min_score = 0.80
+   737→            min_confidence = 0.70
+   738→
+   739→        return result.score >= min_score and result.confidence >= min_confidence
+   740→

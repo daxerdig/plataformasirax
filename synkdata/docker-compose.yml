@@ -1,0 +1,131 @@
+# =============================================================================
+# SynkData Identity Intelligence Platform — Docker Compose
+# =============================================================================
+# Levantar todos los servicios:
+#   docker compose up -d
+#
+# Detener todos los servicios:
+#   docker compose down
+#
+# Ver logs:
+#   docker compose logs -f api
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL 16 ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: synkdata-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synkdata
+      POSTGRES_PASSWORD: synkdata
+      POSTGRES_DB: synkdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synkdata -d synkdata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - synkdata-network
+
+  # ── Redis 7 ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: synkdata-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - synkdata-network
+
+  # ── Neo4j 5 ───────────────────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5
+    container_name: synkdata-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_password
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_server_memory_pagecache_size: 256M
+      NEO4J_server_memory_heap_initial__size: 512M
+      NEO4J_server_memory_heap_max__size: 512M
+      NEO4J_server_bolt_advertised__address: ":7687"
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - synkdata-network
+
+  # ── SynkData API ──────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synkdata-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SYNKDATA_ENV: ${SYNKDATA_ENV:-production}
+      SYNKDATA_DATABASE_URL: postgresql+asyncpg://synkdata:synkdata@postgres:5432/synkdata
+      SYNKDATA_REDIS_URL: redis://redis:6379/0
+      SYNKDATA_NEO4J_URI: bolt://neo4j:7687
+      SYNKDATA_NEO4J_USER: neo4j
+      SYNKDATA_NEO4J_PASSWORD: neo4j_password
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    networks:
+      - synkdata-network
+
+# ── Volúmenes persistentes ──────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+
+# ── Red privada ─────────────────────────────────────────────────────────────
+networks:
+  synkdata-network:
+    driver: bridge
+    name: synkdata-network

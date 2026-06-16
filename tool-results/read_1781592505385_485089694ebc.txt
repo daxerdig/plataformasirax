@@ -1,0 +1,1195 @@
+     1→"""
+     2→Orquestador principal de screening en listas restrictivas.
+     3→
+     4→Coordina la consulta simultánea a todas las fuentes de datos de
+     5→compliance: OFAC, ONU, OpenSanctions, Interpol, PEP, SAT 69-B,
+     6→Diario Oficial de la Federación (DOF) y Suprema Corte de Justicia
+     7→de la Nación (SCJN).
+     8→
+     9→Características principales:
+    10→- Ejecución paralela de todas las fuentes mediante asyncio.gather
+    11→- Aplicación de comparación difusa/fonética a cada resultado
+    12→- Agregación y deduplicación de coincidencias
+    13→- Clasificación automática del nivel de riesgo
+    14→- Manejo graceful de fallos en fuentes individuales
+    15→- Soporte para personas físicas y morales
+    16→
+    17→Los mensajes dirigidos al usuario están en español conforme a los
+    18→estándares de la plataforma SynkData.
+    19→"""
+    20→
+    21→from __future__ import annotations
+    22→
+    23→import asyncio
+    24→import json
+    25→import logging
+    26→import uuid
+    27→from dataclasses import dataclass, field
+    28→from datetime import datetime, timezone
+    29→from enum import Enum
+    30→from typing import Any, Optional
+    31→
+    32→from app.config import get_settings
+    33→from app.database import get_redis
+    34→from app.integrations.interpol import InterpolClient, InterpolMatch
+    35→from app.integrations.ofac import OfacClient, OfacMatch
+    36→from app.integrations.open_sanctions import OpenSanctionsClient, SanctionsMatch
+    37→from app.integrations.un_sanctions import UnSanctionsClient, UnSanctionsMatch
+    38→from app.services.fuzzy_matcher import FuzzyMatcherService, MatchType
+    39→
+    40→logger = logging.getLogger(__name__)
+    41→
+    42→
+    43→# ---------------------------------------------------------------------------
+    44→# Enumeraciones
+    45→# ---------------------------------------------------------------------------
+    46→class RiskLevel(str, Enum):
+    47→    """Nivel de riesgo resultante del screening."""
+    48→
+    49→    NONE = "none"
+    50→    LOW = "low"
+    51→    MEDIUM = "medium"
+    52→    HIGH = "high"
+    53→    CRITICAL = "critical"
+    54→
+    55→
+    56→class EntityType(str, Enum):
+    57→    """Tipo de entidad a screening."""
+    58→
+    59→    PERSON = "person"
+    60→    ENTITY = "entity"
+    61→
+    62→
+    63→# ---------------------------------------------------------------------------
+    64→# Modelos de resultado
+    65→# ---------------------------------------------------------------------------
+    66→@dataclass(frozen=True, slots=True)
+    67→class MatchDetail:
+    68→    """
+    69→    Detalle de una coincidencia individual de screening.
+    70→
+    71→    Attributes:
+    72→        source: Fuente donde se encontró la coincidencia.
+    73→        score: Puntuación de similitud (0.0 a 1.0).
+    74→        match_type: Tipo de coincidencia (exact/fuzzy/phonetic/alias).
+    75→        entity_name: Nombre de la entidad coincidente.
+    76→        entity_data: Datos adicionales de la entidad.
+    77→        is_confirmed: Si la coincidencia fue confirmada manualmente.
+    78→    """
+    79→
+    80→    source: str
+    81→    score: float
+    82→    match_type: str
+    83→    entity_name: str
+    84→    entity_data: dict[str, Any] = field(default_factory=dict)
+    85→    is_confirmed: bool = False
+    86→
+    87→
+    88→@dataclass
+    89→class ScreeningResult:
+    90→    """
+    91→    Resultado completo del screening en listas restrictivas.
+    92→
+    93→    Attributes:
+    94→        matches: Lista de coincidencias encontradas.
+    95→        total_hits: Número total de coincidencias.
+    96→        max_score: Puntuación máxima de todas las coincidencias.
+    97→        risk_level: Nivel de riesgo calculado.
+    98→        sources_checked: Lista de fuentes consultadas.
+    99→        sources_failed: Lista de fuentes que fallaron.
+   100→        timestamp: Fecha y hora del screening.
+   101→        request_id: Identificador único de la solicitud.
+   102→    """
+   103→
+   104→    matches: list[MatchDetail] = field(default_factory=list)
+   105→    total_hits: int = 0
+   106→    max_score: float = 0.0
+   107→    risk_level: RiskLevel = RiskLevel.NONE
+   108→    sources_checked: list[str] = field(default_factory=list)
+   109→    sources_failed: list[str] = field(default_factory=list)
+   110→    timestamp: str = ""
+   111→    request_id: str = ""
+   112→
+   113→    def __post_init__(self) -> None:
+   114→        if not self.timestamp:
+   115→            self.timestamp = datetime.now(timezone.utc).isoformat()
+   116→        if not self.request_id:
+   117→            self.request_id = str(uuid.uuid4())
+   118→
+   119→
+   120→@dataclass
+   121→class Sat69bResult:
+   122→    """
+   123→    Resultado de la verificación en la lista SAT 69-B.
+   124→
+   125→    El artículo 69-B del CFF establece la presunción de operaciones
+   126→    simuladas para contribuyentes que emiten comprobantes fiscales
+   127→    sin contar con los activos, personal o infraestructura necesarios.
+   128→
+   129→    Attributes:
+   130→        is_listed: Si el RFC/nombre aparece en la lista 69-B.
+   131→        rfc: RFC verificado.
+   132→        company_name: Nombre de la empresa/contr ibuyente.
+   133→        status: Estado en la lista (presunto/desvirtuado/definitivo).
+   134→        publication_date: Fecha de publicación en el DOF.
+   135→        docket_number: Número de oficio.
+   136→        observations: Observaciones adicionales.
+   137→    """
+   138→
+   139→    is_listed: bool = False
+   140→    rfc: str = ""
+   141→    company_name: str = ""
+   142→    status: str = ""
+   143→    publication_date: str = ""
+   144→    docket_number: str = ""
+   145→    observations: str = ""
+   146→
+   147→
+   148→@dataclass
+   149→class PepResult:
+   150→    """
+   151→    Resultado de la verificación de Personas Políticamente Expuestas (PEP).
+   152→
+   153→    Attributes:
+   154→        is_pep: Si la persona está identificada como PEP.
+   155→        positions: Lista de cargos políticos desempeñados.
+   156→        country: País donde ejerce/ejerció el cargo.
+   157→        level: Nivel del cargo (national/state/municipal).
+   158→        source: Fuente de la información PEP.
+   159→    """
+   160→
+   161→    is_pep: bool = False
+   162→    positions: list[str] = field(default_factory=list)
+   163→    country: str = ""
+   164→    level: str = ""
+   165→    source: str = ""
+   166→
+   167→
+   168→@dataclass
+   169→class DofResult:
+   170→    """
+   171→    Resultado de la verificación en el Diario Oficial de la Federación.
+   172→
+   173→    Attributes:
+   174→        has_results: Si se encontraron publicaciones relevantes.
+   175→        publications: Lista de publicaciones encontradas.
+   176→        source: Fuente de la información.
+   177→    """
+   178→
+   179→    has_results: bool = False
+   180→    publications: list[dict[str, Any]] = field(default_factory=list)
+   181→    source: str = "DOF"
+   182→
+   183→
+   184→@dataclass
+   185→class ScjnResult:
+   186→    """
+   187→    Resultado de la verificación en la Suprema Corte de Justicia de la Nación.
+   188→
+   189→    Attributes:
+   190→        has_results: Si se encontraron amparos o resoluciones relevantes.
+   191→        cases: Lista de casos/amparos encontrados.
+   192→        source: Fuente de la información.
+   193→    """
+   194→
+   195→    has_results: bool = False
+   196→    cases: list[dict[str, Any]] = field(default_factory=list)
+   197→    source: str = "SCJN"
+   198→
+   199→
+   200→# ---------------------------------------------------------------------------
+   201→# Umbrales de riesgo
+   202→# ---------------------------------------------------------------------------
+   203→_RISK_THRESHOLDS: dict[RiskLevel, tuple[float, float]] = {
+   204→    # (max_score mínimo, total_hits mínimo) para cada nivel
+   205→    RiskLevel.CRITICAL: (0.95, 1),
+   206→    RiskLevel.HIGH: (0.90, 1),
+   207→    RiskLevel.MEDIUM: (0.80, 2),
+   208→    RiskLevel.LOW: (0.70, 1),
+   209→    RiskLevel.NONE: (0.0, 0),
+   210→}
+   211→
+   212→# Nivel de riesgo según tipo de fuente
+   213→_SOURCE_RISK_WEIGHTS: dict[str, float] = {
+   214→    "ofac": 1.0,
+   215→    "un_sanctions": 1.0,
+   216→    "interpol": 0.95,
+   217→    "open_sanctions": 0.85,
+   218→    "pep": 0.70,
+   219→    "sat_69b": 0.90,
+   220→    "dof": 0.60,
+   221→    "scjn": 0.50,
+   222→}
+   223→
+   224→
+   225→# ---------------------------------------------------------------------------
+   226→# Servicio principal de screening
+   227→# ---------------------------------------------------------------------------
+   228→class ComplianceScreeningService:
+   229→    """
+   230→    Orquestador principal del servicio de screening en listas restrictivas.
+   231→
+   232→    Coordina la consulta paralela a todas las fuentes de compliance
+   233→    y consolida los resultados con clasificación automática de riesgo.
+   234→
+   235→    Fuentes soportadas:
+   236→    - OFAC SDN (Specially Designated Nationals)
+   237→    - UN Security Council (sanciones del Consejo de Seguridad)
+   238→    - OpenSanctions (agregador global de sanciones y PEP)
+   239→    - Interpol Red Notices (avisos rojos)
+   240→    - SAT 69-B (presunción de operaciones simuladas - México)
+   241→    - DOF (Diario Oficial de la Federación - México)
+   242→    - SCJN (Suprema Corte de Justicia de la Nación - México)
+   243→    - PEP (Personas Políticamente Expuestas)
+   244→
+   245→    Example:
+   246→        >>> service = ComplianceScreeningService()
+   247→        >>> result = await service.screen_person("Juan Pérez López", nationality="MX")
+   248→        >>> print(f"Nivel de riesgo: {result.risk_level.value}")
+   249→        >>> print(f"Coincidencias: {result.total_hits}")
+   250→    """
+   251→
+   252→    def __init__(self) -> None:
+   253→        """Inicializa el servicio de screening con todos los clientes."""
+   254→        self._matcher = FuzzyMatcherService()
+   255→        self._ofac = OfacClient(matcher=self._matcher)
+   256→        self._un_sanctions = UnSanctionsClient(matcher=self._matcher)
+   257→        self._open_sanctions = OpenSanctionsClient(matcher=self._matcher)
+   258→        self._interpol = InterpolClient(matcher=self._matcher)
+   259→        self._settings = get_settings()
+   260→
+   261→    # ── Screening de persona física ─────────────────────────────────────
+   262→
+   263→    async def screen_person(
+   264→        self,
+   265→        name: str,
+   266→        curp: str | None = None,
+   267→        rfc: str | None = None,
+   268→        nationality: str = "MX",
+   269→        threshold: float | None = None,
+   270→    ) -> ScreeningResult:
+   271→        """
+   272→        Realiza screening completo de una persona física.
+   273→
+   274→        Ejecuta todas las consultas en paralelo usando asyncio.gather
+   275→        y consolida los resultados con deduplicación.
+   276→
+   277→        Args:
+   278→            name: Nombre completo de la persona.
+   279→            curp: CURP de la persona (opcional, para fuentes mexicanas).
+   280→            rfc: RFC de la persona (opcional, para SAT 69-B).
+   281→            nationality: Nacionalidad (código ISO, por defecto MX).
+   282→            threshold: Umbral de similitud personalizado.
+   283→
+   284→        Returns:
+   285→            ScreeningResult con coincidencias y nivel de riesgo.
+   286→        """
+   287→        if not name:
+   288→            return ScreeningResult(
+   289→                risk_level=RiskLevel.NONE,
+   290→                sources_failed=[
+   291→                    "ofac", "un_sanctions", "open_sanctions",
+   292→                    "interpol", "pep", "sat_69b", "dof", "scjn",
+   293→                ],
+   294→            )
+   295→
+   296→        if threshold is None:
+   297→            threshold = self._settings.NAME_SIMILARITY_THRESHOLD
+   298→
+   299→        # Ejecutar todas las fuentes en paralelo
+   300→        results = await self._run_parallel_screening(
+   301→            name=name,
+   302→            curp=curp,
+   303→            rfc=rfc,
+   304→            nationality=nationality,
+   305→            threshold=threshold,
+   306→        )
+   307→
+   308→        # Consolidar resultados
+   309→        return self._consolidate_results(results)
+   310→
+   311→    # ── Screening de persona moral / entidad ────────────────────────────
+   312→
+   313→    async def screen_entity(
+   314→        self,
+   315→        name: str,
+   316→        country: str = "MX",
+   317→        threshold: float | None = None,
+   318→    ) -> ScreeningResult:
+   319→        """
+   320→        Realiza screening de una persona moral o entidad corporativa.
+   321→
+   322→        Similar al screening de persona física pero adaptado para
+   323→        entidades corporativas (sin CURP, sin PEP, etc.).
+   324→
+   325→        Args:
+   326→            name: Nombre de la entidad corporativa.
+   327→            country: País de registro (código ISO).
+   328→            threshold: Umbral de similitud personalizado.
+   329→
+   330→        Returns:
+   331→            ScreeningResult con coincidencias y nivel de riesgo.
+   332→        """
+   333→        if not name:
+   334→            return ScreeningResult(
+   335→                risk_level=RiskLevel.NONE,
+   336→                sources_failed=["ofac", "un_sanctions", "open_sanctions"],
+   337→            )
+   338→
+   339→        if threshold is None:
+   340→            threshold = self._settings.NAME_SIMILARITY_THRESHOLD
+   341→
+   342→        # Ejecutar fuentes relevantes para entidades en paralelo
+   343→        ofac_task = self._screen_ofac(name, threshold)
+   344→        un_task = self._screen_un_sanctions(name, threshold)
+   345→        opensanctions_task = self._screen_open_sanctions(name, country, threshold)
+   346→        sat69b_task = self._screen_sat_69b(name, "")
+   347→        dof_task = self._screen_dof(name)
+   348→
+   349→        ofac_matches, un_matches, os_matches, sat_result, dof_result = (
+   350→            await asyncio.gather(
+   351→                ofac_task, un_task, opensanctions_task,
+   352→                sat69b_task, dof_task,
+   353→                return_exceptions=True,
+   354→            )
+   355→        )
+   356→
+   357→        # Consolidar
+   358→        all_matches: list[MatchDetail] = []
+   359→        sources_checked: list[str] = []
+   360→        sources_failed: list[str] = []
+   361→
+   362→        # Procesar resultados OFAC
+   363→        self._process_ofac_result(ofac_matches, all_matches, sources_checked, sources_failed)
+   364→
+   365→        # Procesar resultados ONU
+   366→        self._process_un_result(un_matches, all_matches, sources_checked, sources_failed)
+   367→
+   368→        # Procesar resultados OpenSanctions
+   369→        self._process_opensanctions_result(os_matches, all_matches, sources_checked, sources_failed)
+   370→
+   371→        # Procesar resultado SAT 69-B
+   372→        if isinstance(sat_result, Sat69bResult) and sat_result.is_listed:
+   373→            sources_checked.append("sat_69b")
+   374→            all_matches.append(
+   375→                MatchDetail(
+   376→                    source="sat_69b",
+   377→                    score=1.0 if sat_result.status == "definitivo" else 0.85,
+   378→                    match_type="exact",
+   379→                    entity_name=sat_result.company_name,
+   380→                    entity_data={
+   381→                        "rfc": sat_result.rfc,
+   382→                        "status": sat_result.status,
+   383→                        "publication_date": sat_result.publication_date,
+   384→                        "docket_number": sat_result.docket_number,
+   385→                        "observations": sat_result.observations,
+   386→                    },
+   387→                )
+   388→            )
+   389→        elif isinstance(sat_result, Exception):
+   390→            sources_failed.append("sat_69b")
+   391→        else:
+   392→            sources_checked.append("sat_69b")
+   393→
+   394→        # Procesar resultado DOF
+   395→        if isinstance(dof_result, DofResult):
+   396→            sources_checked.append("dof")
+   397→            if dof_result.has_results:
+   398→                for pub in dof_result.publications:
+   399→                    all_matches.append(
+   400→                        MatchDetail(
+   401→                            source="dof",
+   402→                            score=0.70,
+   403→                            match_type="fuzzy",
+   404→                            entity_name=pub.get("title", ""),
+   405→                            entity_data=pub,
+   406→                        )
+   407→                    )
+   408→        elif isinstance(dof_result, Exception):
+   409→            sources_failed.append("dof")
+   410→
+   411→        return self._build_screening_result(all_matches, sources_checked, sources_failed)
+   412→
+   413→    # ── Screening SAT 69-B ──────────────────────────────────────────────
+   414→
+   415→    async def screen_sat_69b(
+   416→        self,
+   417→        name: str,
+   418→        rfc: str,
+   419→    ) -> Sat69bResult:
+   420→        """
+   421→        Verifica si un contribuyente está en la lista SAT 69-B.
+   422→
+   423→        El artículo 69-B del Código Fiscal de la Federación establece
+   424→        la presunción de operaciones simuladas. Los contribuyentes
+   425→        listados pueden estar en estado:
+   426→        - "presunto": Presunción de operaciones simuladas
+   427→        - "desvirtuado": Desvirtuó la presunción
+   428→        - "definitivo": Operaciones simuladas definitivas
+   429→
+   430→        Args:
+   431→            name: Nombre del contribuyente.
+   432→            rfc: RFC del contribuyente.
+   433→
+   434→        Returns:
+   435→            Sat69bResult con el resultado de la verificación.
+   436→        """
+   437→        return await self._screen_sat_69b(name, rfc)
+   438→
+   439→    # ── Screening DOF ──────────────────────────────────────────────────
+   440→
+   441→    async def screen_dof(self, name: str) -> DofResult:
+   442→        """
+   443→        Verifica publicaciones relevantes en el Diario Oficial de la Federación.
+   444→
+   445→        Busca en el DOF publicaciones relacionadas con sanciones,
+   446→        inhabilitaciones, decomisos u otras disposiciones oficiales
+   447→        relacionadas con el nombre proporcionado.
+   448→
+   449→        Args:
+   450→            name: Nombre a buscar en el DOF.
+   451→
+   452→        Returns:
+   453→            DofResult con las publicaciones encontradas.
+   454→        """
+   455→        return await self._screen_dof(name)
+   456→
+   457→    # ── Screening SCJN ─────────────────────────────────────────────────
+   458→
+   459→    async def screen_scjn(self, name: str) -> ScjnResult:
+   460→        """
+   461→        Verifica amparos y resoluciones relevantes en la SCJN.
+   462→
+   463→        Busca en los registros de la Suprema Corte de Justicia de la
+   464→        Nación amparos, revisiones y resoluciones relacionadas con
+   465→        el nombre proporcionado.
+   466→
+   467→        Args:
+   468→            name: Nombre a buscar en la SCJN.
+   469→
+   470→        Returns:
+   471→            ScjnResult con los casos encontrados.
+   472→        """
+   473→        return await self._screen_scjn(name)
+   474→
+   475→    # ── Screening PEP ──────────────────────────────────────────────────
+   476→
+   477→    async def screen_pep(
+   478→        self,
+   479→        name: str,
+   480→        country: str = "MX",
+   481→    ) -> PepResult:
+   482→        """
+   483→        Verifica si una persona es una Persona Políticamente Expuesta (PEP).
+   484→
+   485→        Las PEP son individuos que desempeñan o han desempeñado
+   486→        funciones públicas destacadas, incluyendo:
+   487→        - Jefes de Estado o de Gobierno
+   488→        - Políticos de alto nivel
+   489→        - Funcionarios gubernamentales de alto nivel
+   490→        - Oficiales de alto nivel de las fuerzas armadas
+   491→        - Directivos de empresas estatales
+   492→        - Funcionarios de partidos políticos
+   493→
+   494→        Args:
+   495→            name: Nombre de la persona a verificar.
+   496→            country: País para contextualizar la búsqueda.
+   497→
+   498→        Returns:
+   499→            PepResult con el resultado de la verificación.
+   500→        """
+   501→        return await self._screen_pep(name, country)
+   502→
+   503→    # ── Ejecución paralela ─────────────────────────────────────────────
+   504→
+   505→    async def _run_parallel_screening(
+   506→        self,
+   507→        name: str,
+   508→        curp: str | None,
+   509→        rfc: str | None,
+   510→        nationality: str,
+   511→        threshold: float,
+   512→    ) -> dict[str, Any]:
+   513→        """
+   514→        Ejecuta todas las fuentes de screening en paralelo.
+   515→
+   516→        Usa asyncio.gather con return_exceptions=True para que
+   517→        un fallo en una fuente no afecte a las demás.
+   518→
+   519→        Args:
+   520→            name: Nombre a buscar.
+   521→            curp: CURP (opcional).
+   522→            rfc: RFC (opcional).
+   523→            nationality: Nacionalidad.
+   524→            threshold: Umbral de similitud.
+   525→
+   526→        Returns:
+   527→            Diccionario con los resultados de cada fuente.
+   528→        """
+   529→        # Crear tareas para cada fuente
+   530→        tasks = {
+   531→            "ofac": self._screen_ofac(name, threshold),
+   532→            "un_sanctions": self._screen_un_sanctions(name, threshold),
+   533→            "open_sanctions": self._screen_open_sanctions(name, nationality, threshold),
+   534→            "interpol": self._screen_interpol(name, nationality),
+   535→            "pep": self._screen_pep(name, nationality),
+   536→            "sat_69b": self._screen_sat_69b(name, rfc or ""),
+   537→            "dof": self._screen_dof(name),
+   538→            "scjn": self._screen_scjn(name),
+   539→        }
+   540→
+   541→        # Ejecutar todas las tareas en paralelo
+   542→        task_names = list(tasks.keys())
+   543→        task_coros = list(tasks.values())
+   544→
+   545→        results_list = await asyncio.gather(*task_coros, return_exceptions=True)
+   546→
+   547→        # Mapear resultados por nombre de fuente
+   548→        results: dict[str, Any] = {}
+   549→        for name_key, result in zip(task_names, results_list):
+   550→            results[name_key] = result
+   551→
+   552→        return results
+   553→
+   554→    # ── Métodos de screening por fuente ─────────────────────────────────
+   555→
+   556→    async def _screen_ofac(
+   557→        self,
+   558→        name: str,
+   559→        threshold: float,
+   560→    ) -> list[OfacMatch]:
+   561→        """Screening contra la lista OFAC SDN."""
+   562→        try:
+   563→            return await self._ofac.search(name, threshold=threshold)
+   564→        except Exception as exc:
+   565→            logger.error("Error en screening OFAC: %s", exc)
+   566→            raise
+   567→
+   568→    async def _screen_un_sanctions(
+   569→        self,
+   570→        name: str,
+   571→        threshold: float,
+   572→    ) -> list[UnSanctionsMatch]:
+   573→        """Screening contra la lista de sanciones de la ONU."""
+   574→        try:
+   575→            return await self._un_sanctions.search(name, threshold=threshold)
+   576→        except Exception as exc:
+   577→            logger.error("Error en screening ONU: %s", exc)
+   578→            raise
+   579→
+   580→    async def _screen_open_sanctions(
+   581→        self,
+   582→        name: str,
+   583→        country: str,
+   584→        threshold: float,
+   585→    ) -> list[SanctionsMatch]:
+   586→        """Screening contra OpenSanctions."""
+   587→        try:
+   588→            return await self._open_sanctions.search(name, country=country, threshold=threshold)
+   589→        except Exception as exc:
+   590→            logger.error("Error en screening OpenSanctions: %s", exc)
+   591→            raise
+   592→
+   593→    async def _screen_interpol(
+   594→        self,
+   595→        name: str,
+   596→        nationality: str,
+   597→    ) -> list[InterpolMatch]:
+   598→        """Screening contra avisos rojos de Interpol."""
+   599→        try:
+   600→            return await self._interpol.search(name, nationality=nationality)
+   601→        except Exception as exc:
+   602→            logger.error("Error en screening Interpol: %s", exc)
+   603→            raise
+   604→
+   605→    async def _screen_pep(
+   606→        self,
+   607→        name: str,
+   608→        country: str,
+   609→    ) -> PepResult:
+   610→        """
+   611→        Screening de Personas Políticamente Expuestas.
+   612→
+   613→        Consulta OpenSanctions para la verificación PEP, filtrando
+   614→        específicamente por datasets de tipo PEP.
+   615→        """
+   616→        try:
+   617→            pep_datasets = [
+   618→                "pep",
+   619→                "everypolitician",
+   620→                "wikidata_pep",
+   621→                "mex_pep",
+   622→            ]
+   623→            matches = await self._open_sanctions.search(
+   624→                name,
+   625→                country=country.lower(),
+   626→                threshold=0.80,
+   627→                datasets=pep_datasets,
+   628→            )
+   629→
+   630→            if not matches:
+   631→                return PepResult(is_pep=False, country=country)
+   632→
+   633→            # Analizar los resultados para determinar cargos y nivel
+   634→            positions: list[str] = []
+   635→            highest_level = "municipal"
+   636→
+   637→            for match in matches:
+   638→                props = match.entity.properties
+   639→                position = props.get("position", props.get("title", ""))
+   640→                if position:
+   641→                    positions.append(str(position))
+   642→
+   643→                # Determinar nivel del cargo
+   644→                description = str(position).upper()
+   645→                if any(kw in description for kw in (
+   646→                    "PRESIDENTE", "PRESIDENTA", "GOBERNADOR", "GOBERNADORA",
+   647→                    "SENADOR", "SENADORA", "SECRETARIO", "SECRETARIA DE ESTADO",
+   648→                    "MINISTRO", "MINISTRA", "PROCURADOR", "FISCAL GENERAL",
+   649→                    "PRESIDENT", "GOVERNOR", "SENATOR", "MINISTER",
+   650→                )):
+   651→                    highest_level = "national"
+   652→                elif any(kw in description for kw in (
+   653→                    "DIPUTADO", "DIPUTADA", "ALCALDE", "ALCALDESA",
+   654→                    "PRESIDENTE MUNICIPAL", "REGIDOR",
+   655→                    "DEPUTY", "MAYOR",
+   656→                )):
+   657→                    if highest_level != "national":
+   658→                        highest_level = "state"
+   659→
+   660→            return PepResult(
+   661→                is_pep=True,
+   662→                positions=positions,
+   663→                country=country,
+   664→                level=highest_level,
+   665→                source="opensanctions_pep",
+   666→            )
+   667→
+   668→        except Exception as exc:
+   669→            logger.error("Error en screening PEP: %s", exc)
+   670→            raise
+   671→
+   672→    async def _screen_sat_69b(
+   673→        self,
+   674→        name: str,
+   675→        rfc: str,
+   676→    ) -> Sat69bResult:
+   677→        """
+   678→        Screening contra la lista SAT 69-B.
+   679→
+   680→        Consulta la API del SAT para verificar si el contribuyente
+   681→        está listado en el artículo 69-B del CFF.
+   682→        """
+   683→        try:
+   684→            settings = get_settings()
+   685→            import httpx
+   686→
+   687→            params: dict[str, str] = {}
+   688→            if rfc:
+   689→                params["rfc"] = rfc
+   690→            elif name:
+   691→                params["nombre"] = name
+   692→            else:
+   693→                return Sat69bResult()
+   694→
+   695→            headers: dict[str, str] = {}
+   696→            if settings.SAT_API_KEY:
+   697→                headers["Authorization"] = f"Bearer {settings.SAT_API_KEY}"
+   698→
+   699→            async with httpx.AsyncClient(timeout=15.0) as client:
+   700→                response = await client.get(
+   701→                    f"{settings.SAT_API_URL}/articulo-69-b",
+   702→                    params=params,
+   703→                    headers=headers,
+   704→                )
+   705→
+   706→                if response.status_code == 404:
+   707→                    return Sat69bResult(rfc=rfc)
+   708→
+   709→                response.raise_for_status()
+   710→                data = response.json()
+   711→
+   712→                # Parsear la respuesta del SAT
+   713→                results = data.get("results", data if isinstance(data, list) else [data])
+   714→
+   715→                if not results:
+   716→                    return Sat69bResult(rfc=rfc)
+   717→
+   718→                first_result = results[0] if isinstance(results, list) else results
+   719→
+   720→                # Verificar coincidencia difusa del nombre si no se usó RFC
+   721→                if not rfc and name:
+   722→                    sat_name = first_result.get("nombre", first_result.get("name", ""))
+   723→                    if sat_name:
+   724→                        match_results = self._matcher.match(name, [sat_name], threshold=0.75)
+   725→                        if not match_results:
+   726→                            return Sat69bResult(rfc=rfc)
+   727→
+   728→                return Sat69bResult(
+   729→                    is_listed=True,
+   730→                    rfc=first_result.get("rfc", rfc),
+   731→                    company_name=first_result.get("nombre", first_result.get("name", "")),
+   732→                    status=first_result.get("situacion", first_result.get("status", "presunto")),
+   733→                    publication_date=first_result.get("fecha_publicacion", ""),
+   734→                    docket_number=first_result.get("oficio", first_result.get("docket_number", "")),
+   735→                    observations=first_result.get("observaciones", ""),
+   736→                )
+   737→
+   738→        except Exception as exc:
+   739→            logger.error("Error en screening SAT 69-B: %s", exc)
+   740→            raise
+   741→
+   742→    async def _screen_dof(self, name: str) -> DofResult:
+   743→        """
+   744→        Screening en el Diario Oficial de la Federación.
+   745→
+   746→        Busca publicaciones relevantes en el DOF relacionadas con
+   747→        sanciones, inhabilitaciones y disposiciones oficiales.
+   748→        """
+   749→        try:
+   750→            import httpx
+   751→
+   752→            # API del DOF (datos.gob.mx)
+   753→            async with httpx.AsyncClient(timeout=15.0) as client:
+   754→                params = {
+   755→                    "q": name,
+   756→                    "limit": 10,
+   757→                    "sort": "fecha-desc",
+   758→                }
+   759→
+   760→                response = await client.get(
+   761→                    "https://www.dof.gob.mx/v2/api/busqueda",
+   762→                    params=params,
+   763→                    headers={"Accept": "application/json"},
+   764→                )
+   765→
+   766→                if response.status_code != 200:
+   767→                    return DofResult()
+   768→
+   769→                data = response.json()
+   770→                publications: list[dict[str, Any]] = []
+   771→
+   772→                for item in data.get("results", data.get("items", [])):
+   773→                    title = item.get("titulo", item.get("title", ""))
+   774→                    summary = item.get("resumen", item.get("summary", ""))
+   775→
+   776→                    # Filtrar solo publicaciones relevantes para compliance
+   777→                    relevance_keywords = (
+   778→                        "sanción", "sancionar", "inhabilit", "multa",
+   779→                        "decomiso", "proceso penal", "orden de aprensión",
+   780→                        "averiguación previa", "carpeta de investigación",
+   781→                        "lista negra", "operación simulada",
+   782→                    )
+   783→
+   784→                    combined_text = f"{title} {summary}".lower()
+   785→                    is_relevant = any(kw in combined_text for kw in relevance_keywords)
+   786→
+   787→                    if is_relevant:
+   788→                        publications.append({
+   789→                            "title": title,
+   790→                            "summary": summary,
+   791→                            "date": item.get("fecha", item.get("date", "")),
+   792→                            "url": item.get("url", ""),
+   793→                            "section": item.get("seccion", item.get("section", "")),
+   794→                        })
+   795→
+   796→                return DofResult(
+   797→                    has_results=len(publications) > 0,
+   798→                    publications=publications,
+   799→                )
+   800→
+   801→        except Exception as exc:
+   802→            logger.error("Error en screening DOF: %s", exc)
+   803→            raise
+   804→
+   805→    async def _screen_scjn(self, name: str) -> ScjnResult:
+   806→        """
+   807→        Screening en la Suprema Corte de Justicia de la Nación.
+   808→
+   809→        Busca amparos, revisiones y resoluciones relevantes en los
+   810→        registros públicos de la SCJN.
+   811→        """
+   812→        try:
+   813→            import httpx
+   814→
+   815→            # API de la SCJN (buscador de precedentes)
+   816→            async with httpx.AsyncClient(timeout=15.0) as client:
+   817→                params = {
+   818→                    "q": name,
+   819→                    "limit": 10,
+   820→                    "tipo": "amparo",
+   821→                }
+   822→
+   823→                response = await client.get(
+   824→                    "https://www.scjn.gob.mx/api/busqueda",
+   825→                    params=params,
+   826→                    headers={"Accept": "application/json"},
+   827→                )
+   828→
+   829→                if response.status_code != 200:
+   830→                    return ScjnResult()
+   831→
+   832→                data = response.json()
+   833→                cases: list[dict[str, Any]] = []
+   834→
+   835→                for item in data.get("results", data.get("items", [])):
+   836→                    rubro = item.get("rubro", item.get("title", ""))
+   837→                    caso_tipo = item.get("tipo", item.get("type", ""))
+   838→
+   839→                    cases.append({
+   840→                        "title": rubro,
+   841→                        "type": caso_tipo,
+   842→                        "date": item.get("fecha", item.get("date", "")),
+   843→                        "docket": item.get("expediente", item.get("docket", "")),
+   844→                        "url": item.get("url", ""),
+   845→                        "court": item.get("organo", item.get("court", "")),
+   846→                    })
+   847→
+   848→                return ScjnResult(
+   849→                    has_results=len(cases) > 0,
+   850→                    cases=cases,
+   851→                )
+   852→
+   853→        except Exception as exc:
+   854→            logger.error("Error en screening SCJN: %s", exc)
+   855→            raise
+   856→
+   857→    # ── Consolidación de resultados ─────────────────────────────────────
+   858→
+   859→    def _consolidate_results(
+   860→        self,
+   861→        results: dict[str, Any],
+   862→    ) -> ScreeningResult:
+   863→        """
+   864→        Consolida los resultados de todas las fuentes de screening.
+   865→
+   866→        Aplica deduplicación y clasificación de riesgo.
+   867→
+   868→        Args:
+   869→            results: Diccionario con los resultados de cada fuente.
+   870→
+   871→        Returns:
+   872→            ScreeningResult consolidado.
+   873→        """
+   874→        all_matches: list[MatchDetail] = []
+   875→        sources_checked: list[str] = []
+   876→        sources_failed: list[str] = []
+   877→
+   878→        # Procesar OFAC
+   879→        ofac_result = results.get("ofac")
+   880→        self._process_ofac_result(ofac_result, all_matches, sources_checked, sources_failed)
+   881→
+   882→        # Procesar ONU
+   883→        un_result = results.get("un_sanctions")
+   884→        self._process_un_result(un_result, all_matches, sources_checked, sources_failed)
+   885→
+   886→        # Procesar OpenSanctions
+   887→        os_result = results.get("open_sanctions")
+   888→        self._process_opensanctions_result(os_result, all_matches, sources_checked, sources_failed)
+   889→
+   890→        # Procesar Interpol
+   891→        interpol_result = results.get("interpol")
+   892→        self._process_interpol_result(interpol_result, all_matches, sources_checked, sources_failed)
+   893→
+   894→        # Procesar PEP
+   895→        pep_result = results.get("pep")
+   896→        if isinstance(pep_result, PepResult):
+   897→            sources_checked.append("pep")
+   898→            if pep_result.is_pep:
+   899→                all_matches.append(
+   900→                    MatchDetail(
+   901→                        source="pep",
+   902→                        score=0.70,
+   903→                        match_type="exact",
+   904→                        entity_name="PEP",
+   905→                        entity_data={
+   906→                            "positions": pep_result.positions,
+   907→                            "country": pep_result.country,
+   908→                            "level": pep_result.level,
+   909→                            "source": pep_result.source,
+   910→                        },
+   911→                    )
+   912→                )
+   913→        elif isinstance(pep_result, Exception):
+   914→            sources_failed.append("pep")
+   915→
+   916→        # Procesar SAT 69-B
+   917→        sat_result = results.get("sat_69b")
+   918→        if isinstance(sat_result, Sat69bResult) and sat_result.is_listed:
+   919→            sources_checked.append("sat_69b")
+   920→            score = 1.0 if sat_result.status == "definitivo" else 0.85
+   921→            all_matches.append(
+   922→                MatchDetail(
+   923→                    source="sat_69b",
+   924→                    score=score,
+   925→                    match_type="exact",
+   926→                    entity_name=sat_result.company_name,
+   927→                    entity_data={
+   928→                        "rfc": sat_result.rfc,
+   929→                        "status": sat_result.status,
+   930→                        "publication_date": sat_result.publication_date,
+   931→                        "docket_number": sat_result.docket_number,
+   932→                        "observations": sat_result.observations,
+   933→                    },
+   934→                )
+   935→            )
+   936→        elif isinstance(sat_result, Exception):
+   937→            sources_failed.append("sat_69b")
+   938→        else:
+   939→            sources_checked.append("sat_69b")
+   940→
+   941→        # Procesar DOF
+   942→        dof_result = results.get("dof")
+   943→        if isinstance(dof_result, DofResult):
+   944→            sources_checked.append("dof")
+   945→            if dof_result.has_results:
+   946→                for pub in dof_result.publications:
+   947→                    all_matches.append(
+   948→                        MatchDetail(
+   949→                            source="dof",
+   950→                            score=0.60,
+   951→                            match_type="fuzzy",
+   952→                            entity_name=pub.get("title", ""),
+   953→                            entity_data=pub,
+   954→                        )
+   955→                    )
+   956→        elif isinstance(dof_result, Exception):
+   957→            sources_failed.append("dof")
+   958→
+   959→        # Procesar SCJN
+   960→        scjn_result = results.get("scjn")
+   961→        if isinstance(scjn_result, ScjnResult):
+   962→            sources_checked.append("scjn")
+   963→            if scjn_result.has_results:
+   964→                for case in scjn_result.cases:
+   965→                    all_matches.append(
+   966→                        MatchDetail(
+   967→                            source="scjn",
+   968→                            score=0.50,
+   969→                            match_type="fuzzy",
+   970→                            entity_name=case.get("title", ""),
+   971→                            entity_data=case,
+   972→                        )
+   973→                    )
+   974→        elif isinstance(scjn_result, Exception):
+   975→            sources_failed.append("scjn")
+   976→
+   977→        return self._build_screening_result(all_matches, sources_checked, sources_failed)
+   978→
+   979→    # ── Procesamiento de resultados por fuente ──────────────────────────
+   980→
+   981→    def _process_ofac_result(
+   982→        self,
+   983→        result: Any,
+   984→        matches: list[MatchDetail],
+   985→        sources_checked: list[str],
+   986→        sources_failed: list[str],
+   987→    ) -> None:
+   988→        """Procesa el resultado de OFAC y agrega coincidencias."""
+   989→        if isinstance(result, list):
+   990→            sources_checked.append("ofac")
+   991→            for match in result:
+   992→                if isinstance(match, OfacMatch):
+   993→                    matches.append(
+   994→                        MatchDetail(
+   995→                            source="ofac",
+   996→                            score=match.match_score,
+   997→                            match_type=match.match_type,
+   998→                            entity_name=match.record.name,
+   999→                            entity_data={
+  1000→                                "sdn_id": match.record.id,
+  1001→                                "type": match.record.type,
+  1002→                                "program": match.record.program,
+  1003→                                "title": match.record.title,
+  1004→                                "remarks": match.record.remarks,
+  1005→                                "aliases": match.record.aliases,
+  1006→                                "addresses": match.record.addresses,
+  1007→                            },
+  1008→                        )
+  1009→                    )
+  1010→        elif isinstance(result, Exception):
+  1011→            sources_failed.append("ofac")
+  1012→
+  1013→    def _process_un_result(
+  1014→        self,
+  1015→        result: Any,
+  1016→        matches: list[MatchDetail],
+  1017→        sources_checked: list[str],
+  1018→        sources_failed: list[str],
+  1019→    ) -> None:
+  1020→        """Procesa el resultado de la ONU y agrega coincidencias."""
+  1021→        if isinstance(result, list):
+  1022→            sources_checked.append("un_sanctions")
+  1023→            for match in result:
+  1024→                if isinstance(match, UnSanctionsMatch):
+  1025→                    matches.append(
+  1026→                        MatchDetail(
+  1027→                            source="un_sanctions",
+  1028→                            score=match.match_score,
+  1029→                            match_type=match.match_type,
+  1030→                            entity_name=match.entity.name,
+  1031→                            entity_data={
+  1032→                                "entity_id": match.entity.id,
+  1033→                                "entity_type": match.entity.entity_type,
+  1034→                                "committee": match.entity.committee,
+  1035→                                "nationality": match.entity.nationality,
+  1036→                                "aliases": match.entity.aliases,
+  1037→                                "designation_date": match.entity.designation_date,
+  1038→                            },
+  1039→                        )
+  1040→                    )
+  1041→        elif isinstance(result, Exception):
+  1042→            sources_failed.append("un_sanctions")
+  1043→
+  1044→    def _process_opensanctions_result(
+  1045→        self,
+  1046→        result: Any,
+  1047→        matches: list[MatchDetail],
+  1048→        sources_checked: list[str],
+  1049→        sources_failed: list[str],
+  1050→    ) -> None:
+  1051→        """Procesa el resultado de OpenSanctions y agrega coincidencias."""
+  1052→        if isinstance(result, list):
+  1053→            sources_checked.append("open_sanctions")
+  1054→            for match in result:
+  1055→                if isinstance(match, SanctionsMatch):
+  1056→                    matches.append(
+  1057→                        MatchDetail(
+  1058→                            source="open_sanctions",
+  1059→                            score=match.score,
+  1060→                            match_type=match.match_type,
+  1061→                            entity_name=match.entity.name,
+  1062→                            entity_data={
+  1063→                                "entity_id": match.entity.id,
+  1064→                                "schema": match.entity.schema,
+  1065→                                "datasets": match.datasets,
+  1066→                                "aliases": match.entity.aliases,
+  1067→                                "countries": match.entity.countries,
+  1068→                                "properties": match.properties,
+  1069→                            },
+  1070→                        )
+  1071→                    )
+  1072→        elif isinstance(result, Exception):
+  1073→            sources_failed.append("open_sanctions")
+  1074→
+  1075→    def _process_interpol_result(
+  1076→        self,
+  1077→        result: Any,
+  1078→        matches: list[MatchDetail],
+  1079→        sources_checked: list[str],
+  1080→        sources_failed: list[str],
+  1081→    ) -> None:
+  1082→        """Procesa el resultado de Interpol y agrega coincidencias."""
+  1083→        if isinstance(result, list):
+  1084→            sources_checked.append("interpol")
+  1085→            for match in result:
+  1086→                if isinstance(match, InterpolMatch):
+  1087→                    matches.append(
+  1088→                        MatchDetail(
+  1089→                            source="interpol",
+  1090→                            score=match.match_score,
+  1091→                            match_type=match.match_type,
+  1092→                            entity_name=match.notice.name,
+  1093→                            entity_data={
+  1094→                                "notice_id": match.notice.notice_id,
+  1095→                                "notice_type": match.notice.notice_type,
+  1096→                                "nationalities": match.notice.nationalities,
+  1097→                                "charges": match.notice.charges,
+  1098→                                "arresting_country": match.notice.arresting_country,
+  1099→                                "date_of_birth": match.notice.date_of_birth,
+  1100→                                "sex": match.notice.sex,
+  1101→                            },
+  1102→                        )
+  1103→                    )
+  1104→        elif isinstance(result, Exception):
+  1105→            sources_failed.append("interpol")
+  1106→
+  1107→    # ── Construcción del resultado final ────────────────────────────────
+  1108→
+  1109→    def _build_screening_result(
+  1110→        self,
+  1111→        matches: list[MatchDetail],
+  1112→        sources_checked: list[str],
+  1113→        sources_failed: list[str],
+  1114→    ) -> ScreeningResult:
+  1115→        """
+  1116→        Construye el resultado final de screening con deduplicación
+  1117→        y clasificación de riesgo.
+  1118→
+  1119→        Args:
+  1120→            matches: Lista de coincidencias encontradas.
+  1121→            sources_checked: Fuentes consultadas exitosamente.
+  1122→            sources_failed: Fuentes que fallaron.
+  1123→
+  1124→        Returns:
+  1125→            ScreeningResult con deduplicación y nivel de riesgo.
+  1126→        """
+  1127→        # Deduplicar coincidencias (mismo nombre + fuente)
+  1128→        seen: set[str] = set()
+  1129→        unique_matches: list[MatchDetail] = []
+  1130→        for match in matches:
+  1131→            key = f"{match.source}:{match.entity_name}:{match.match_type}"
+  1132→            if key not in seen:
+  1133→                seen.add(key)
+  1134→                unique_matches.append(match)
+  1135→
+  1136→        # Calcular métricas
+  1137→        total_hits = len(unique_matches)
+  1138→        max_score = max((m.score for m in unique_matches), default=0.0)
+  1139→
+  1140→        # Calcular score ponderado por fuente
+  1141→        weighted_score = 0.0
+  1142→        for match in unique_matches:
+  1143→            weight = _SOURCE_RISK_WEIGHTS.get(match.source, 0.5)
+  1144→            weighted_score = max(weighted_score, match.score * weight)
+  1145→
+  1146→        # Clasificar nivel de riesgo
+  1147→        risk_level = self._classify_risk(max_score, weighted_score, total_hits)
+  1148→
+  1149→        return ScreeningResult(
+  1150→            matches=unique_matches,
+  1151→            total_hits=total_hits,
+  1152→            max_score=round(max_score, 4),
+  1153→            risk_level=risk_level,
+  1154→            sources_checked=sources_checked,
+  1155→            sources_failed=sources_failed,
+  1156→        )
+  1157→
+  1158→    def _classify_risk(
+  1159→        self,
+  1160→        max_score: float,
+  1161→        weighted_score: float,
+  1162→        total_hits: int,
+  1163→    ) -> RiskLevel:
+  1164→        """
+  1165→        Clasifica el nivel de riesgo basado en coincidencias.
+  1166→
+  1167→        La clasificación considera:
+  1168→        - Puntuación máxima de coincidencia
+  1169→        - Score ponderado por criticidad de la fuente
+  1170→        - Número total de coincidencias
+  1171→        - Presencia en fuentes de alta criticidad (OFAC, ONU)
+  1172→
+  1173→        Args:
+  1174→            max_score: Puntuación máxima de coincidencia.
+  1175→            weighted_score: Puntuación ponderada por fuente.
+  1176→            total_hits: Número total de coincidencias.
+  1177→
+  1178→        Returns:
+  1179→            RiskLevel clasificado.
+  1180→        """
+  1181→        # Criterios de clasificación (de más a menos estricto)
+  1182→        if weighted_score >= 0.95 or (max_score >= 0.95 and total_hits >= 1):
+  1183→            return RiskLevel.CRITICAL
+  1184→
+  1185→        if weighted_score >= 0.85 or (max_score >= 0.90 and total_hits >= 1):
+  1186→            return RiskLevel.HIGH
+  1187→
+  1188→        if weighted_score >= 0.70 or (max_score >= 0.80 and total_hits >= 2):
+  1189→            return RiskLevel.MEDIUM
+  1190→
+  1191→        if weighted_score >= 0.55 or (max_score >= 0.70 and total_hits >= 1):
+  1192→            return RiskLevel.LOW
+  1193→
+  1194→        return RiskLevel.NONE
+  1195→

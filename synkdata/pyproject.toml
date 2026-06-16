@@ -1,0 +1,147 @@
+# =============================================================================
+# SynkData Identity Intelligence Platform — Configuración del Proyecto
+# =============================================================================
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synkdata"
+version = "1.0.0"
+description = "Plataforma de inteligencia de identidad para verificación, antecedentes, cumplimiento normativo y análisis de riesgo enfocada en México y LATAM."
+readme = "README.md"
+license = {text = "Proprietary"}
+requires-python = ">=3.11"
+authors = [
+    {name = "SynkData Team", email = "dev@synkdata.io"},
+]
+keywords = [
+    "identity-verification",
+    "background-checks",
+    "compliance",
+    "kyc",
+    "aml",
+    "mexico",
+    "latam",
+    "curp",
+    "rfc",
+    "ofac",
+    "risk-intelligence",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "redis[hiredis]>=5.2.0",
+    "neo4j>=5.26.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.20",
+    "httpx>=0.28.0",
+    "aiohttp>=3.11.0",
+    "python-dotenv>=1.0.0",
+    "fuzzywuzzy>=0.18.0",
+    "python-Levenshtein>=0.26.0",
+    "pytesseract>=0.3.13",
+    "Pillow>=11.0.0",
+    "pdf2image>=1.17.0",
+    "phonenumbers>=8.13.0",
+    "email-validator>=2.2.0",
+    "numpy>=2.2.0",
+    "networkx>=3.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+    "pre-commit>=4.0.0",
+    "ipython>=8.31.0",
+]
+
+[project.scripts]
+synkdata = "app.main:main"
+
+# ── setuptools ────────────────────────────────────────────────────────────────
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "integration: pruebas de integración que requieren servicios externos",
+    "slow: pruebas que toman más de 1 segundo",
+]
+
+# ── ruff (linter/formatter) ──────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "fuzzywuzzy.*",
+    "pytesseract.*",
+    "pdf2image.*",
+    "phonenumbers.*",
+    "Levenshtein.*",
+    "neo4j.*",
+]
+ignore_missing_imports = true
