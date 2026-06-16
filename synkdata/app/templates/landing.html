@@ -3,219 +3,574 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SynkData — Inteligencia de Identidad</title>
-    <style>
-        :root {
-            --primary: #0a4d8c;
-            --primary-dark: #073964;
-            --accent: #00c2a8;
-            --bg: #f5f7fa;
-            --text: #1f2937;
-            --muted: #6b7280;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            line-height: 1.6;
-        }
-        header {
-            background: var(--primary);
-            color: white;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        header h1 { margin: 0; font-size: 1.4rem; }
-        header a {
-            color: white;
-            text-decoration: none;
-            background: var(--accent);
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            font-weight: 600;
-        }
-        .hero {
-            text-align: center;
-            padding: 4rem 2rem 2rem;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-        }
-        .hero h2 { font-size: 2.5rem; margin-bottom: 1rem; }
-        .hero p { font-size: 1.2rem; max-width: 700px; margin: 0 auto 2rem; opacity: 0.9; }
-        .container { max-width: 800px; margin: 3rem auto; padding: 0 2rem; }
-        form {
-            background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        }
-        .form-group { margin-bottom: 1rem; }
-        label { display: block; margin-bottom: 0.3rem; font-weight: 500; }
-        input, textarea, select {
-            width: 100%;
-            padding: 0.7rem;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            font-size: 1rem;
-        }
-        textarea { min-height: 100px; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-        button {
-            background: var(--primary);
-            color: white;
-            padding: 0.8rem 1.5rem;
-            border: none;
-            border-radius: 4px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            width: 100%;
-            margin-top: 1rem;
-        }
-        button:hover { background: var(--primary-dark); }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-            margin: 3rem 0;
-        }
-        .feature {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .feature h3 { color: var(--primary); margin-top: 0; }
-        footer {
-            text-align: center;
-            padding: 2rem;
-            color: var(--muted);
-            font-size: 0.9rem;
-        }
-    </style>
+    <title>SynkData — Inteligencia de Identidad para México y LATAM</title>
+    <meta name="description" content="Plataforma de inteligencia de identidad: verificación CURP/RFC, screening OFAC/ONU/Interpol, scoring de riesgo y analítica en tiempo real.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/landing.css">
+    <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
 </head>
-<body>
-    <header>
-        <h1>SynkData</h1>
-        <a href="/api/v1/auth/login">Iniciar sesión</a>
-    </header>
+<body class="landing">
 
-    <section class="hero">
-        <h2>Inteligencia de Identidad para México y LATAM</h2>
-        <p>Verificación de identidad, antecedentes, cumplimiento normativo KYC/AML y
-           análisis de riesgo en una sola plataforma.</p>
-    </section>
+    <!-- ═══ NAVBAR ════════════════════════════════════════════════════════ -->
+    <nav class="landing-nav">
+        <a href="#" class="landing-nav-logo">
+            <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="navLogo" x1="0" y1="0" x2="40" y2="40">
+                        <stop offset="0%" stop-color="#00D9FF"/>
+                        <stop offset="100%" stop-color="#2563EB"/>
+                    </linearGradient>
+                </defs>
+                <path d="M20 2 L34 8 V20 C34 28 28 35 20 38 C12 35 6 28 6 20 V8 Z"
+                      stroke="url(#navLogo)" stroke-width="2" fill="rgba(0,217,255,0.05)"/>
+                <path d="M14 18 Q20 12 26 18 Q20 24 14 18 Z M14 22 Q20 28 26 22"
+                      stroke="url(#navLogo)" stroke-width="2" fill="none" stroke-linecap="round"/>
+            </svg>
+            SynkData
+        </a>
+        <div class="landing-nav-links">
+            <a href="#features">Plataforma</a>
+            <a href="#network">Inteligencia</a>
+            <a href="#process">Proceso</a>
+            <a href="#access">Solicitar acceso</a>
+            <a href="/login" style="color: #00D9FF; font-weight: 600;">Iniciar sesión</a>
+        </div>
+    </nav>
 
-    <div class="container">
-        <div class="features">
-            <div class="feature">
-                <h3>CURP & RFC</h3>
-                <p>Validación oficial contra RENAPO y SAT.</p>
+    <!-- ═══ HERO ═══════════════════════════════════════════════════════════ -->
+    <section class="hero-section">
+        <div class="hero-mesh"></div>
+        <div class="hero-grid"></div>
+        <canvas class="hero-particles" id="heroParticles"></canvas>
+
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+
+        <div class="scan-line"></div>
+        <div class="scan-line"></div>
+        <div class="scan-line"></div>
+
+        <div class="hero-content">
+            <div class="hero-badge">Plataforma de Identity Intelligence</div>
+            <h1 class="hero-title">
+                Inteligencia de Identidad<br>
+                para <span class="gradient-word">México y LATAM</span>
+            </h1>
+            <p class="hero-subtitle">
+                Una sola plataforma para <span id="typedText" style="color:#00D9FF; font-weight:500;"></span><span style="color:#00D9FF; animation: blink 1s infinite;">|</span>
+                <br>Verifica, mide riesgo y cumple con normativas KYC/AML en segundos.
+            </p>
+            <div class="hero-ctas">
+                <a href="#access" class="btn-primary-anim">
+                    Solicitar acceso
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 8h10m0 0L8 3m5 5l-5 5" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+                <a href="#features" class="btn-secondary-anim">
+                    Explorar la plataforma
+                </a>
             </div>
-            <div class="feature">
-                <h3>Screening</h3>
-                <p>Listas restrictivas OFAC, Interpol, OpenSanctions.</p>
-            </div>
-            <div class="feature">
-                <h3>Riesgo</h3>
-                <p>Motor de scoring con factores y mitigantes.</p>
-            </div>
-            <div class="feature">
-                <h3>Analítica</h3>
-                <p>Dashboards ejecutivos en tiempo real.</p>
+
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <div class="hero-stat-number" data-target="8" data-suffix="+">0</div>
+                    <div class="hero-stat-label">Fuentes de screening</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-number" data-target="59" data-suffix="+">0</div>
+                    <div class="hero-stat-label">Plataformas digitales</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-number" data-target="100" data-suffix="%">0</div>
+                    <div class="hero-stat-label">Cobertura CURP/RFC</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-number" data-target="2" data-suffix="s">0</div>
+                    <div class="hero-stat-label">Tiempo de respuesta</div>
+                </div>
             </div>
         </div>
 
-        <form id="accessForm" action="/api/v1/access/request" method="POST">
-            <h2>Solicitar acceso a la plataforma</h2>
-            <p style="color: var(--muted);">Complete el formulario y un administrador
-               revisará su solicitud.</p>
+        <div class="scroll-indicator">Scroll</div>
+    </section>
 
-            <div class="form-group">
-                <label for="full_name">Nombre completo *</label>
-                <input type="text" id="full_name" name="full_name" required>
-            </div>
+    <!-- ═══ FEATURES ═══════════════════════════════════════════════════════ -->
+    <section class="section section-dark" id="features">
+        <div class="reveal">
+            <div class="section-eyebrow">Plataforma</div>
+            <h2 class="section-title">
+                Todo lo que necesitas para<br>
+                <span class="gradient">verificar y proteger</span>
+            </h2>
+            <p class="section-subtitle">
+                Once módulos integrados que cubren el ciclo completo: desde la validación
+                gubernamental hasta el análisis de redes ocultas y la generación de reportes
+                con inteligencia artificial.
+            </p>
+        </div>
 
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="email">Correo electrónico *</label>
-                    <input type="email" id="email" name="email" required>
+        <div class="features-grid">
+            <div class="feature-card reveal reveal-delay-1">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="16" rx="2"/>
+                        <path d="M7 8h10M7 12h10M7 16h6"/>
+                    </svg>
                 </div>
-                <div class="form-group">
-                    <label for="phone">Teléfono *</label>
-                    <input type="tel" id="phone" name="phone" required>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="company">Empresa</label>
-                    <input type="text" id="company" name="company">
-                </div>
-                <div class="form-group">
-                    <label for="position">Cargo</label>
-                    <input type="text" id="position" name="position">
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="curp">CURP (opcional)</label>
-                    <input type="text" id="curp" name="curp" maxlength="18">
-                </div>
-                <div class="form-group">
-                    <label for="rfc">RFC (opcional)</label>
-                    <input type="text" id="rfc" name="rfc" maxlength="13">
+                <h3 class="feature-title">Verificación CURP & RFC</h3>
+                <p class="feature-desc">
+                    Validación con dígito verificador oficial, consulta RENAPO en tiempo real
+                    y verificación de estado fiscal en SAT (LFTP y Artículo 69-B).
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">RENAPO</span>
+                    <span class="feature-tag">SAT</span>
+                    <span class="feature-tag">69-B</span>
                 </div>
             </div>
 
-            <div class="form-group">
-                <label for="use_case">Caso de uso *</label>
-                <textarea id="use_case" name="use_case" required
-                    placeholder="Describa cómo planea utilizar la plataforma..."></textarea>
+            <div class="feature-card reveal reveal-delay-2">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z"/>
+                        <path d="M9 12l2 2 4-4"/>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Screening de Cumplimiento</h3>
+                <p class="feature-desc">
+                    Cruce contra OFAC SDN, ONU, Interpol, OpenSanctions, PEP y listas mexicanas.
+                    Matching fuzzy + fonético español con alias normalizados.
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">OFAC</span>
+                    <span class="feature-tag">ONU</span>
+                    <span class="feature-tag">Interpol</span>
+                    <span class="feature-tag">PEP</span>
+                </div>
             </div>
 
-            <div class="form-group">
-                <label for="expected_volume">Volumen esperado (verificaciones/mes)</label>
-                <input type="number" id="expected_volume" name="expected_volume" min="0">
+            <div class="feature-card reveal reveal-delay-3">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 11.5c0 4.5-4 8-9 8-1.5 0-3-.4-4.2-1L3 20l1.5-4.8C3.6 14 3 12.5 3 11c0-4.5 4-8 9-8s9 4 9 8.5z"/>
+                        <circle cx="8" cy="11" r="1" fill="currentColor"/>
+                        <circle cx="12" cy="11" r="1" fill="currentColor"/>
+                        <circle cx="16" cy="11" r="1" fill="currentColor"/>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Inteligencia Digital</h3>
+                <p class="feature-desc">
+                    Email (HIBP, MX, disposable), teléfono (carrier, línea, spam) y username
+                    en 59+ plataformas con scoring de presencia profesional.
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">HIBP</span>
+                    <span class="feature-tag">Hunter.io</span>
+                    <span class="feature-tag">59+ redes</span>
+                </div>
             </div>
 
-            <button type="submit">Enviar solicitud</button>
-        </form>
-    </div>
+            <div class="feature-card reveal reveal-delay-1">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3"/>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Knowledge Graph</h3>
+                <p class="feature-desc">
+                    Grafo relacional en Neo4j que detecta redes ocultas, vínculos entre
+                    entidades y patrones sospechosos como empresas shell o circular ownership.
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">Neo4j</span>
+                    <span class="feature-tag">Redes ocultas</span>
+                </div>
+            </div>
 
-    <footer>
-        &copy; 2024 SynkData Identity Intelligence Platform.
+            <div class="feature-card reveal reveal-delay-2">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18"/>
+                        <path d="M7 14l4-4 4 4 5-5"/>
+                        <circle cx="7" cy="14" r="1.5" fill="currentColor"/>
+                        <circle cx="11" cy="10" r="1.5" fill="currentColor"/>
+                        <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Trust Score + Risk Score</h3>
+                <p class="feature-desc">
+                    Scoring dual: señales positivas (RENAPO, SAT, presencia profesional) y
+                    negativas (OFAC, RND, inconsistencias) con recomendación APPROVE/REVIEW/REJECT.
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">APPROVE</span>
+                    <span class="feature-tag">REVIEW</span>
+                    <span class="feature-tag">REJECT</span>
+                </div>
+            </div>
+
+            <div class="feature-card reveal reveal-delay-3">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="4" y="4" width="16" height="16" rx="2"/>
+                        <path d="M9 9h6v6H9z"/>
+                        <path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>
+                    </svg>
+                </div>
+                <h3 class="feature-title">OCR de Documentos</h3>
+                <p class="feature-desc">
+                    Extracción automática de INE (tipos A-E), pasaporte con MRZ y comprobante
+                    de domicilio. Validación cruzada contra datos declarados.
+                </p>
+                <div class="feature-meta">
+                    <span class="feature-tag">INE</span>
+                    <span class="feature-tag">Pasaporte</span>
+                    <span class="feature-tag">Tesseract</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ MARQUEE de fuentes de datos ═════════════════════════════════════ -->
+    <section class="marquee-section">
+        <div class="marquee-label">Fuentes de datos integradas</div>
+        <div class="marquee">
+            <div class="marquee-item"><div class="marquee-item-icon">R</div>RENAPO</div>
+            <div class="marquee-item"><div class="marquee-item-icon">S</div>SAT</div>
+            <div class="marquee-item"><div class="marquee-item-icon">O</div>OFAC SDN</div>
+            <div class="marquee-item"><div class="marquee-item-icon">U</div>UN SC</div>
+            <div class="marquee-item"><div class="marquee-item-icon">I</div>Interpol</div>
+            <div class="marquee-item"><div class="marquee-item-icon">P</div>PEP</div>
+            <div class="marquee-item"><div class="marquee-item-icon">H</div>HIBP</div>
+            <div class="marquee-item"><div class="marquee-item-icon">G</div>GitHub</div>
+            <div class="marquee-item"><div class="marquee-item-icon">L</div>LinkedIn</div>
+            <div class="marquee-item"><div class="marquee-item-icon">X</div>X / Twitter</div>
+            <!-- duplicado para loop infinito -->
+            <div class="marquee-item"><div class="marquee-item-icon">R</div>RENAPO</div>
+            <div class="marquee-item"><div class="marquee-item-icon">S</div>SAT</div>
+            <div class="marquee-item"><div class="marquee-item-icon">O</div>OFAC SDN</div>
+            <div class="marquee-item"><div class="marquee-item-icon">U</div>UN SC</div>
+            <div class="marquee-item"><div class="marquee-item-icon">I</div>Interpol</div>
+            <div class="marquee-item"><div class="marquee-item-icon">P</div>PEP</div>
+            <div class="marquee-item"><div class="marquee-item-icon">H</div>HIBP</div>
+            <div class="marquee-item"><div class="marquee-item-icon">G</div>GitHub</div>
+            <div class="marquee-item"><div class="marquee-item-icon">L</div>LinkedIn</div>
+            <div class="marquee-item"><div class="marquee-item-icon">X</div>X / Twitter</div>
+        </div>
+    </section>
+
+    <!-- ═══ NETWORK GRAPH ═══════════════════════════════════════════════════ -->
+    <section class="network-section" id="network">
+        <div class="network-container">
+            <div class="reveal">
+                <div class="section-eyebrow">Inteligencia Relacional</div>
+                <h2 class="section-title">
+                    Detecta <span class="gradient">redes ocultas</span><br>
+                    antes de que sean un riesgo
+                </h2>
+                <p class="section-subtitle">
+                    Cada verificación alimenta un grafo de conocimiento que conecta personas,
+                    empresas, teléfonos, emails y direcciones. Cuando una nueva entidad se
+                    evalúa, SynkData encuentra vínculos con entidades previamente sancionadas
+                    o de riesgo, incluso si intentan ocultar la relación.
+                </p>
+                <div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 2rem;">
+                    <div>
+                        <div style="font-size:2rem; font-weight:800; color:#00D9FF;">7</div>
+                        <div style="color:#94a3b8; font-size:0.9rem;">tipos de entidad</div>
+                    </div>
+                    <div>
+                        <div style="font-size:2rem; font-weight:800; color:#00D9FF;">8</div>
+                        <div style="color:#94a3b8; font-size:0.9rem;">tipos de relación</div>
+                    </div>
+                    <div>
+                        <div style="font-size:2rem; font-weight:800; color:#00D9FF;">5</div>
+                        <div style="color:#94a3b8; font-size:0.9rem;">patrones sospechosos</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="network-graph reveal reveal-delay-2">
+                <svg id="networkGraph" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <radialGradient id="centerGlow">
+                            <stop offset="0%" stop-color="#00D9FF" stop-opacity="0.4"/>
+                            <stop offset="100%" stop-color="#00D9FF" stop-opacity="0"/>
+                        </radialGradient>
+                        <filter id="nodeGlow">
+                            <feGaussianBlur stdDeviation="3" result="blur"/>
+                            <feMerge>
+                                <feMergeNode in="blur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+
+                    <!-- Glow del centro -->
+                    <circle cx="250" cy="250" r="80" fill="url(#centerGlow)"/>
+
+                    <!-- Aristas (se llenan vía JS) -->
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+                    <path class="net-edge" d=""/>
+
+                    <!-- Nodos -->
+                    <circle class="net-node center" cx="250" cy="250" r="14" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+                    <circle class="net-node" r="8" filter="url(#nodeGlow)"/>
+
+                    <!-- Etiquetas -->
+                    <text class="net-label">Persona</text>
+                    <text class="net-label">Empresa</text>
+                    <text class="net-label">CURP</text>
+                    <text class="net-label">RFC</text>
+                    <text class="net-label">Email</text>
+                    <text class="net-label">Teléfono</text>
+                    <text class="net-label">Dirección</text>
+                    <text class="net-label">Cuenta</text>
+
+                    <!-- Centro label -->
+                    <text x="250" y="254" class="net-label" style="fill:#00D9FF; font-weight:600;">Identidad</text>
+                </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ STATS ══════════════════════════════════════════════════════════ -->
+    <section class="stats-section">
+        <div class="stats-grid">
+            <div class="stat-item reveal">
+                <div class="stat-value" data-target="8" data-suffix="+">0</div>
+                <div class="stat-label">Fuentes restrictivas</div>
+                <div class="stat-sublabel">OFAC, ONU, Interpol, SAT, PEP…</div>
+            </div>
+            <div class="stat-item reveal reveal-delay-1">
+                <div class="stat-value" data-target="59" data-suffix="+">0</div>
+                <div class="stat-label">Plataformas digitales</div>
+                <div class="stat-sublabel">Redes sociales, foros, dev platforms</div>
+            </div>
+            <div class="stat-item reveal reveal-delay-2">
+                <div class="stat-value" data-target="100" data-suffix="%">0</div>
+                <div class="stat-label">Cobertura oficial MX</div>
+                <div class="stat-sublabel">32 estados + NE extranjero</div>
+            </div>
+            <div class="stat-item reveal reveal-delay-3">
+                <div class="stat-value" data-target="3" data-suffix="s">0</div>
+                <div class="stat-label">Evaluación completa</div>
+                <div class="stat-sublabel">Identidad + screening + riesgo</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ TIMELINE / PROCESO ═════════════════════════════════════════════ -->
+    <section class="timeline-section" id="process">
+        <div class="timeline-container">
+            <div class="reveal" style="text-align:center; margin-bottom: 4rem;">
+                <div class="section-eyebrow" style="padding-left:0;">Proceso</div>
+                <h2 class="section-title">Del dato al veredicto en <span class="gradient">4 pasos</span></h2>
+            </div>
+
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-step">Paso 01</div>
+                    <h3 class="timeline-title">Captura de identidad</h3>
+                    <p class="timeline-desc">
+                        El cliente ingresa CURP, RFC, nombre, email, teléfono y opcionalmente
+                        documentos (INE, pasaporte). OCR extrae los datos automáticamente.
+                    </p>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-step">Paso 02</div>
+                    <h3 class="timeline-title">Verificación multi-fuente</h3>
+                    <p class="timeline-desc">
+                        Validación RENAPO + SAT, screening contra 8 listas restrictivas con
+                        matching fuzzy y fonético, análisis de email/teléfono/username en 59+
+                        plataformas digitales.
+                    </p>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-step">Paso 03</div>
+                    <h3 class="timeline-title">Correlación y scoring</h3>
+                    <p class="timeline-desc">
+                        El motor correlaciona todas las señales y produce un Trust Score
+                        (positivas) y un Risk Score (negativas) con recomendación
+                        APPROVE / REVIEW / REJECT.
+                    </p>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-step">Paso 04</div>
+                    <h3 class="timeline-title">Reporte de investigación</h3>
+                    <p class="timeline-desc">
+                        El motor de IA genera un reporte en lenguaje natural con hallazgos,
+                        factores de riesgo, mitigantes y recomendaciones accionables para
+                        el equipo de cumplimiento.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ ACCESS FORM ═════════════════════════════════════════════════════ -->
+    <section class="form-section" id="access">
+        <div class="orb orb-1" style="top: 20%; left: -15%;"></div>
+        <div class="orb orb-2" style="bottom: 10%; right: -10%;"></div>
+
+        <div class="form-container reveal">
+            <h2 class="form-title">Solicitar acceso a la plataforma</h2>
+            <p class="form-subtitle">
+                Completa el formulario y un administrador revisará tu solicitud.
+                Solo el admin puede crear cuentas.
+            </p>
+
+            <form id="accessForm" novalidate>
+                <div class="form-field">
+                    <label class="form-label" for="full_name">Nombre completo *</label>
+                    <input class="form-input" type="text" id="full_name" name="full_name"
+                           placeholder="Juan Pérez López" required>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-label" for="email">Correo electrónico *</label>
+                        <input class="form-input" type="email" id="email" name="email"
+                               placeholder="juan@empresa.com" required>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label" for="phone">Teléfono *</label>
+                        <input class="form-input" type="tel" id="phone" name="phone"
+                               placeholder="+52 55 1234 5678" required>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-label" for="company">Empresa</label>
+                        <input class="form-input" type="text" id="company" name="company"
+                               placeholder="Mi Empresa S.A. de C.V.">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label" for="position">Cargo</label>
+                        <input class="form-input" type="text" id="position" name="position"
+                               placeholder="Compliance Officer">
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-label" for="curp">CURP (opcional)</label>
+                        <input class="form-input" type="text" id="curp" name="curp"
+                               maxlength="18" placeholder="GOME850101HDFRRN09">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label" for="rfc">RFC (opcional)</label>
+                        <input class="form-input" type="text" id="rfc" name="rfc"
+                               maxlength="13" placeholder="GOME850101AB1">
+                    </div>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-label" for="use_case">Caso de uso *</label>
+                    <textarea class="form-textarea" id="use_case" name="use_case" required
+                              placeholder="Describe cómo planeas utilizar la plataforma: onboarding de clientes, KYC recurrente, screening de proveedores, etc."></textarea>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-label" for="expected_volume">
+                        Volumen esperado (verificaciones/mes)
+                    </label>
+                    <input class="form-input" type="number" id="expected_volume"
+                           name="expected_volume" min="0" placeholder="500">
+                </div>
+
+                <button type="submit" class="form-submit">
+                    Enviar solicitud de acceso
+                </button>
+
+                <p style="text-align:center; color:#64748b; font-size:0.85rem; margin-top:1rem;">
+                    Al enviar aceptas nuestros términos de servicio y política de privacidad.
+                </p>
+            </form>
+        </div>
+    </section>
+
+    <!-- ═══ FOOTER ══════════════════════════════════════════════════════════ -->
+    <footer class="landing-footer">
+        <div class="footer-container">
+            <div>
+                <div class="footer-brand">
+                    <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+                        <defs>
+                            <linearGradient id="footerLogo" x1="0" y1="0" x2="40" y2="40">
+                                <stop offset="0%" stop-color="#00D9FF"/>
+                                <stop offset="100%" stop-color="#2563EB"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M20 2 L34 8 V20 C34 28 28 35 20 38 C12 35 6 28 6 20 V8 Z"
+                              stroke="url(#footerLogo)" stroke-width="2" fill="rgba(0,217,255,0.05)"/>
+                    </svg>
+                    SynkData
+                </div>
+                <p class="footer-tagline">
+                    Plataforma de Inteligencia de Identidad para México y LATAM.
+                    Verificación, cumplimiento y análisis de riesgo en una sola API.
+                </p>
+            </div>
+            <div class="footer-col">
+                <h4>Plataforma</h4>
+                <a href="#features">Verificación</a>
+                <a href="#features">Screening</a>
+                <a href="#network">Knowledge Graph</a>
+                <a href="#features">OCR</a>
+            </div>
+            <div class="footer-col">
+                <h4>Empresa</h4>
+                <a href="#">Sobre nosotros</a>
+                <a href="#">Contacto</a>
+                <a href="#">Carreras</a>
+                <a href="#">Blog</a>
+            </div>
+            <div class="footer-col">
+                <h4>Legal</h4>
+                <a href="#">Términos</a>
+                <a href="#">Privacidad</a>
+                <a href="#">Seguridad</a>
+                <a href="#">Cumplimiento</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div>© 2024 SynkData Identity Intelligence Platform. Todos los derechos reservados.</div>
+            <div>Hecho en México 🇲🇽</div>
+        </div>
     </footer>
 
-    <script>
-        document.getElementById('accessForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const data = Object.fromEntries(new FormData(form).entries());
-            if (data.expected_volume) data.expected_volume = parseInt(data.expected_volume);
-            else delete data.expected_volume;
+    <style>
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
 
-            try {
-                const resp = await fetch('/api/v1/access/request', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data),
-                });
-                if (resp.ok) {
-                    window.location.href = '/api/v1/access/success';
-                } else {
-                    const err = await resp.json();
-                    alert('Error: ' + (err.detail || 'No se pudo enviar la solicitud.'));
-                }
-            } catch (err) {
-                alert('Error de red: ' + err.message);
-            }
-        });
-    </script>
+    <script src="/static/js/landing.js"></script>
 </body>
 </html>
