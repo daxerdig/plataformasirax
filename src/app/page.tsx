@@ -28,6 +28,7 @@ import {
   ResponsiveContainer, RadialBarChart, RadialBar,
 } from 'recharts'
 import { useToast } from '@/hooks/use-toast'
+import { generateCheckPDF } from '@/lib/generate-pdf'
 
 // ==================== API Helper ====================
 const API = {
@@ -1648,10 +1649,26 @@ function CheckResultsView() {
     }
   }, [check, viewData, token])
 
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const { toast } = useToast()
+
   if (loading) return <div className="p-8 animate-pulse space-y-4"><div className="h-8 bg-white/8 rounded w-96" /><div className="h-64 bg-white/8 rounded-lg" /></div>
   if (!check) return <div className="p-8"><p className="text-white/45">No se encontró el check.</p></div>
 
   const riskColor = RISK_COLORS[check.risk_level] || '#64748b'
+
+  const handleDownloadPDF = async () => {
+    setPdfLoading(true)
+    try {
+      await generateCheckPDF(check)
+      toast({ title: 'PDF generado', description: 'El reporte se descargó correctamente.' })
+    } catch (e) {
+      console.error(e)
+      toast({ title: 'Error al generar PDF', description: 'Intenta de nuevo.', variant: 'destructive' })
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-6xl mx-auto">
@@ -1667,7 +1684,21 @@ function CheckResultsView() {
             <div className="text-sm text-white/45">Recomendación: {check.recommendation}</div>
           </div>
         </div>
-        <div className="text-xs text-white/40 font-mono">{check.created_at?.slice(0, 19).replace('T', ' ')}</div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-white/40 font-mono">{check.created_at?.slice(0, 19).replace('T', ' ')}</div>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={handleDownloadPDF}
+            disabled={pdfLoading}
+            className="inline-flex items-center gap-2 bg-sirax-teal text-sirax-navy px-4 py-2 rounded-lg font-semibold text-sm hover:bg-sirax-teal-bright transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {pdfLoading
+              ? <><RefreshCw className="h-4 w-4 animate-spin" /> Generando PDF…</>
+              : <><Download className="h-4 w-4" /> Descargar Reporte PDF</>
+            }
+          </motion.button>
+        </div>
       </div>
 
       {/* Scores */}
