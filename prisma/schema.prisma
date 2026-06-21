@@ -15,8 +15,45 @@ model User {
   role         String   @default("analyst")
   organization String?
   checks       Check[]
+  apiKeys      ApiKey[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// ── API Keys para acceso programático externo (sirax.lat/v1) ──
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String                        // etiqueta descriptiva
+  keyHash     String    @unique             // SHA-256 del key real (nunca se guarda plain)
+  keyPrefix   String                        // primeros 8 chars para identificar en UI
+  scopes      String    @default("*")       // "*" = todos | "identity,sanctions,digital"
+  rateLimit   Int       @default(1000)      // peticiones / mes
+  usageCount  Int       @default(0)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+  @@index([userId])
+}
+
+// ── Log de peticiones a la API pública ──
+model ApiRequestLog {
+  id         String   @id @default(cuid())
+  apiKeyId   String
+  endpoint   String
+  method     String
+  statusCode Int
+  durationMs Int
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([apiKeyId])
+  @@index([createdAt])
 }
 
 model Check {
