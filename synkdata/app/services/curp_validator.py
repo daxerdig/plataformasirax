@@ -248,14 +248,10 @@ class CurpValidatorService:
             if not renapo_data:
                 logger.info("Nubarium no encontró datos para %s, intentando fallback APIMarket...", curp_upper)
                 renapo_data = await self._call_apimarket_curp(curp_upper)
-                
-                # Si APIMarket falla, intentar Maigret
+
+                # Como último recurso, intentar RENAPO directo (si estuviera configurado)
                 if not renapo_data:
-                    renapo_data = await self._call_maigret_curp(curp_upper)
-                    
-                    # Como último recurso, intentar RENAPO directo (si estuviera configurado)
-                    if not renapo_data:
-                        renapo_data = await self._call_renapo_api(curp_upper)
+                    renapo_data = await self._call_renapo_api(curp_upper)
 
             result.renapo_match = renapo_data is not None
 
@@ -425,7 +421,7 @@ class CurpValidatorService:
             logger.warning("Error almacenando en caché CURP: %s", exc)
 
     # -----------------------------------------------------------------------
-    # Métodos de fallback (APIMarket, Maigret)
+    # Métodos de fallback (APIMarket)
     # -----------------------------------------------------------------------
 
     async def _call_apimarket_curp(self, curp: str) -> Optional[Dict[str, Any]]:
@@ -444,23 +440,6 @@ class CurpValidatorService:
                     return response.json()
         except Exception as exc:
             logger.error("Error consultando APIMarket para CURP %s: %s", curp, exc)
-        return None
-
-    async def _call_maigret_curp(self, curp: str) -> Optional[Dict[str, Any]]:
-        """Fallback: Consulta CURP en Maigret (búsqueda de identidad)."""
-        if not self._settings.MAIGRET_API_URL:
-            return None
-            
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    f"{self._settings.MAIGRET_API_URL}/curp/{curp}"
-                )
-                if response.status_code == 200:
-                    logger.info("Información de CURP %s obtenida vía Maigret", curp)
-                    return response.json()
-        except Exception as exc:
-            logger.debug("Maigret CURP no disponible: %s", exc)
         return None
 
     # -----------------------------------------------------------------------

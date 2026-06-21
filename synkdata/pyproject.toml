@@ -65,7 +65,9 @@ dependencies = [
     "phonenumbers>=8.13.0",
     "email-validator>=2.2.0",
     "numpy>=2.2.0",
-    "networkx>=3.4.0",
+    "networkx>=2.6.3,<3.0.0",
+    "sherlock-project>=0.16.0",
+    "maigret>=0.6.1",
 ]
 
 [project.optional-dependencies]

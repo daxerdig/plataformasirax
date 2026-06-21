@@ -18,6 +18,7 @@ Características:
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 from dataclasses import dataclass, field
@@ -640,36 +641,58 @@ class UsernameIntelligenceService:
         """
         import os
         import tempfile
-        
+
+        # Tiempo máximo total que se le permite a cada herramienta externa
+        # antes de matar el proceso. Evita que un colgado de Sherlock/Maigret
+        # deje la petición HTTP esperando indefinidamente.
+        EXTERNAL_TOOL_TIMEOUT = 45
+
         external_profiles: List[PlatformProfile] = []
-        
+
         # ── Ejecutar Sherlock ───────────────────────────────────────────
         if self._settings.SHERLOCK_PATH:
             try:
                 logger.debug("Ejecutando Sherlock para: %s", username)
-                process = await asyncio.create_subprocess_exec(
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    process = await asyncio.create_subprocess_exec(
+                        self._settings.SHERLOCK_PATH,
+                        username,
+                        "--timeout", "10",
+                        "--print-found",
+                        "--csv",
+                        "--no-color",
+                        cwd=tmpdir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            process.communicate(), timeout=EXTERNAL_TOOL_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.communicate()
+                        logger.debug("Sherlock excedió el timeout para: %s", username)
+
+                    # Sherlock con --csv guarda el reporte como
+                    # "<cwd>/<username>.csv"
+                    csv_path = os.path.join(tmpdir, f"{username}.csv")
+                    if os.path.exists(csv_path):
+                        with open(csv_path, newline="", encoding="utf-8") as f:
+                            for row in csv.DictReader(f):
+                                if row.get("exists") == "Claimed":
+                                    external_profiles.append(PlatformProfile(
+                                        platform=f"{row.get('name')} (Sherlock)",
+                                        url=row.get("url_user"),
+                                        exists=True,
+                                        category=PlatformCategory.SOCIAL,
+                                    ))
+            except FileNotFoundError:
+                logger.warning(
+                    "El binario de Sherlock ('%s') no está instalado o no "
+                    "está en el PATH. Instala el paquete 'sherlock-project'.",
                     self._settings.SHERLOCK_PATH,
-                    username,
-                    "--timeout", "10",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
                 )
-                stdout, _ = await process.communicate()
-                
-                if process.returncode == 0:
-                    output = stdout.decode().splitlines()
-                    for line in output:
-                        if "http" in line and "[:]" not in line:
-                            parts = line.split(": ")
-                            if len(parts) >= 2:
-                                platform = parts[0].strip().replace("[+]", "").strip()
-                                url = parts[1].strip()
-                                external_profiles.append(PlatformProfile(
-                                    platform=f"{platform} (Sherlock)",
-                                    url=url,
-                                    exists=True,
-                                    category=PlatformCategory.SOCIAL,
-                                ))
             except Exception as exc:
                 logger.debug("Error ejecutando Sherlock localmente: %s", exc)
 
@@ -682,21 +705,40 @@ class UsernameIntelligenceService:
                         self._settings.MAIGRET_PATH,
                         username,
                         "--timeout", "10",
-                        "--unstable",
-                        "--no-extract",
+                        "--no-extracting",
+                        "--no-recursion",
+                        "--no-autoupdate",
+                        "--no-color",
+                        "--no-progressbar",
                         "--json", "simple",
                         cwd=tmpdir,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        stderr=asyncio.subprocess.PIPE,
                     )
-                    await process.communicate()
-                    
-                    report_path = os.path.join(tmpdir, f"report_{username}.json")
+                    try:
+                        await asyncio.wait_for(
+                            process.communicate(), timeout=EXTERNAL_TOOL_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.communicate()
+                        logger.debug("Maigret excedió el timeout para: %s", username)
+
+                    # Maigret guarda el reporte JSON en
+                    # "<cwd>/reports/report_<username>_simple.json"
+                    # (carpeta "reports" por defecto + sufijo del tipo de
+                    # reporte en el nombre del archivo).
+                    safe_username = username.replace("/", "_")
+                    report_path = os.path.join(
+                        tmpdir, "reports", f"report_{safe_username}_simple.json"
+                    )
                     if os.path.exists(report_path):
                         with open(report_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
-                            for site_name, site_data in data.get("sites", {}).items():
-                                if site_data.get("status") == "claimed":
+                            sites = data.get("sites", data) if isinstance(data, dict) else {}
+                            for site_name, site_data in sites.items():
+                                status = site_data.get("status") if isinstance(site_data, dict) else None
+                                if status in ("claimed", "Claimed"):
                                     external_profiles.append(PlatformProfile(
                                         platform=f"{site_name} (Maigret)",
                                         url=site_data.get("url_user"),
@@ -704,6 +746,12 @@ class UsernameIntelligenceService:
                                         category=PlatformCategory.SOCIAL,
                                         profile_data=site_data,
                                     ))
+            except FileNotFoundError:
+                logger.warning(
+                    "El binario de Maigret ('%s') no está instalado o no "
+                    "está en el PATH. Instala el paquete 'maigret'.",
+                    self._settings.MAIGRET_PATH,
+                )
             except Exception as exc:
                 logger.debug("Error ejecutando Maigret localmente: %s", exc)
 

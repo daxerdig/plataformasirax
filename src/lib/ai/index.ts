@@ -2,7 +2,7 @@
 // debe importar un proveedor directamente — siempre usa generateAiText().
 //
 // Selección de proveedor:
-//   AI_PROVIDER=anthropic | openai | google | custom
+//   AI_PROVIDER=anthropic | openai | google | groq | custom
 //   Si no se define, prueba todos en orden hasta encontrar uno configurado.
 //   Si el preferido falla en tiempo de ejecución (rate limit, red, etc.),
 //   automáticamente intenta el siguiente configurado como fallback.
@@ -10,6 +10,7 @@
 import { anthropicProvider } from './providers/anthropic'
 import { openaiProvider } from './providers/openai'
 import { googleProvider } from './providers/google'
+import { groqProvider } from './providers/groq'
 import { customProvider } from './providers/custom'
 import type { AiProvider, AiGenerateOptions, AiGenerateResult } from './types'
 
@@ -19,6 +20,7 @@ const PROVIDERS: AiProvider[] = [
   anthropicProvider,
   openaiProvider,
   googleProvider,
+  groqProvider,
   customProvider,
 ]
 
@@ -51,7 +53,7 @@ export async function generateAiText(prompt: string, opts?: AiGenerateOptions): 
     provider: 'none',
     error: attempted.length > 0
       ? `Todos los proveedores configurados fallaron (${attempted.join(', ')})`
-      : 'Ningún proveedor de IA configurado. Define AI_PROVIDER y la API key correspondiente (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_API_KEY, o AI_CUSTOM_BASE_URL+AI_CUSTOM_MODEL).',
+      : 'Ningún proveedor de IA configurado. Define AI_PROVIDER y la API key correspondiente (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_API_KEY, GROQ_API_KEY, o AI_CUSTOM_BASE_URL+AI_CUSTOM_MODEL).',
   }
 }
 
