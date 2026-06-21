@@ -10,6 +10,8 @@ services:
       dockerfile: Dockerfile
     container_name: sirax
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: 3000

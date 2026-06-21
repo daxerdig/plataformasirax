@@ -21,7 +21,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ---------------------------------------------------------------------------
 # Ruta base del proyecto (donde reside el .env)
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Cuando synkdata se despliega solo (Railway/Docker propio), su .env vive en
+# synkdata/.env. Cuando se corre dentro del monorepo (dev local junto al
+# frontend Next.js), las credenciales suelen estar en el .env de la raíz del
+# repo. Probamos ambas ubicaciones, en ese orden, para no requerir duplicar
+# el archivo.
+_SYNKDATA_DIR = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _SYNKDATA_DIR.parent
+
+_ENV_FILE_CANDIDATES = [
+    _SYNKDATA_DIR / ".env",
+    _REPO_ROOT / ".env",
+]
+_ENV_FILE = next(
+    (str(p) for p in _ENV_FILE_CANDIDATES if p.exists()),
+    str(_SYNKDATA_DIR / ".env"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +81,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=str(_PROJECT_ROOT / ".env"),
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         env_prefix="SYNKDATA_",
         case_sensitive=False,
@@ -136,10 +151,12 @@ class Settings(BaseSettings):
     NUBARIUM_USER: str = Field(
         default="",
         description="Usuario para el servicio de Nubarium.",
+        validation_alias="NUBARIUM_USER",
     )
     NUBARIUM_PASSWORD: str = Field(
         default="",
         description="Contraseña para el servicio de Nubarium.",
+        validation_alias="NUBARIUM_PASSWORD",
     )
     NUBARIUM_CURP_URL: str = "https://curp.nubarium.com/renapo/v2/valida_curp"
     NUBARIUM_RFC_URL: str = "https://rfc.nubarium.com/sat/v2/valida_rfc"
@@ -148,6 +165,7 @@ class Settings(BaseSettings):
     RENAPO_API_KEY: str = Field(
         default="",
         description="Clave API para el servicio de validación RENAPO (CURP).",
+        validation_alias="RENAPO_API_KEY",
     )
     RENAPO_API_URL: str = "https://api.gob.mx/renapo/v1"
     RENAPO_TIMEOUT: int = 15
@@ -155,6 +173,7 @@ class Settings(BaseSettings):
     SAT_API_KEY: str = Field(
         default="",
         description="Clave API para el servicio de validación SAT (RFC).",
+        validation_alias="SAT_API_KEY",
     )
     SAT_API_URL: str = "https://api.gob.mx/sat/v1"
     SAT_TIMEOUT: int = 15
@@ -163,18 +182,21 @@ class Settings(BaseSettings):
     OFAC_API_KEY: str = Field(
         default="",
         description="Clave API para la consulta de listas OFAC.",
+        validation_alias="OFAC_API_KEY",
     )
     OFAC_API_URL: str = "https://api.ofac.gov/v1"
 
     OPENSANCTIONS_API_KEY: str = Field(
         default="",
         description="Clave API para OpenSanctions.",
+        validation_alias="OPENSANCTIONS_API_KEY",
     )
     OPENSANCTIONS_API_URL: str = "https://api.opensanctions.org/v1"
 
     INTERPOL_API_KEY: str = Field(
         default="",
         description="Clave API para la consulta de avisos Interpol.",
+        validation_alias="INTERPOL_API_KEY",
     )
     INTERPOL_API_URL: str = "https://ws-public.interpol.int/notices/v1"
 
@@ -182,34 +204,40 @@ class Settings(BaseSettings):
     SERPAPI_API_KEY: str = Field(
         default="",
         description="Clave API para SerpApi (Google Search Dorks).",
+        validation_alias="SERPAPI_API_KEY",
     )
     SERPAPI_API_URL: str = "https://serpapi.com/search"
 
     APIMARKET_API_KEY: str = Field(
         default="",
         description="Clave API para APIMarket (fallback para CURP/RFC).",
+        validation_alias="APIMARKET_API_KEY",
     )
     APIMARKET_API_URL: str = "https://api.apimarket.mx/v1"
 
     MAIGRET_PATH: str = Field(
         default="maigret",
         description="Ruta al binario o comando de Maigret.",
+        validation_alias="MAIGRET_PATH",
     )
 
     SHERLOCK_PATH: str = Field(
         default="sherlock",
         description="Ruta al binario o comando de Sherlock.",
+        validation_alias="SHERLOCK_PATH",
     )
 
     HIBP_API_KEY: str = Field(
         default="",
         description="Clave API para Have I Been Pwned (verificación de correo).",
+        validation_alias="HIBP_API_KEY",
     )
     HIBP_API_URL: str = "https://haveibeenpwned.com/api/v3"
 
     HUNTER_API_KEY: str = Field(
         default="",
         description="Clave API para Hunter.io (verificación de correo).",
+        validation_alias="HUNTER_API_KEY",
     )
     HUNTER_API_URL: str = "https://api.hunter.io/v2"
 
