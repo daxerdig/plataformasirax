@@ -45,20 +45,16 @@ ENV NEXT_PUBLIC_APP_VENDOR="Synkdata"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --ingroup nodejs nextjs
 
-# Servidor standalone
+# Servidor standalone de Next.js (Se extrae directamente a la raíz de /app)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Prisma client + schema (para migraciones en runtime)
+# Prisma client + schema (necesarios para migraciones en runtime)
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
-
-# Script de arranque (migración + servidor)
-COPY --chown=nextjs:nodejs scripts/start.sh ./start.sh
-RUN chmod +x ./start.sh
 
 USER nextjs
 
@@ -67,4 +63,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["./start.sh"]
+# Comando de arranque: ejecuta migraciones y levanta el servidor standalone
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node server.js"]
