@@ -22,8 +22,14 @@ RUN npm ci
 # Generar Prisma client
 RUN npx prisma generate
 
-# Copiar fuente y construir
+# Copiar fuente
 COPY . .
+
+# ─── SOLUCIÓN AL ERROR DE COMPILACIÓN ───
+# Inyecta un valor dummy para saltarse la validación estática de auth.ts en Next.js
+ENV JWT_SECRET="dummy_secret_for_build_purposes_only"
+
+# Construir la aplicación
 RUN npm run build
 
 # ─────────────────────────────────────────────
@@ -45,7 +51,7 @@ ENV NEXT_PUBLIC_APP_VENDOR="Synkdata"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --ingroup nodejs nextjs
 
-# Servidor standalone de Next.js (Se extrae directamente a la raíz de /app)
+# Servidor standalone de Next.js
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
